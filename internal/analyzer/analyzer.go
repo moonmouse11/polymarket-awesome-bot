@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"context"
-	"strings"
 )
 
 // MarketEvent represents a single event/market from Polymarket

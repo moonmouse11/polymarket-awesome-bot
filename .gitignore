@@ -1,5 +1,31 @@
-.pi 
+# Binaries
+/bot
+/bin/
+/polymarket-bot
+*.exe
+*.test
+*.out
+
+# Coverage
+coverage.*
+*.coverprofile
+
+# Environment (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# Go workspace
+go.work
+go.work.sum
+
+# AI agents
+.pi
 .claude
 .codex
-.env
 
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
