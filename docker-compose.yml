@@ -4,7 +4,7 @@ services:
   bot:
     build: .
     environment:
-      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_URI=mongodb://${MONGO_APP_USER:-polymarket_app}:${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD in .env}@mongodb:27017/polymarket?authSource=polymarket
       - JEV_API_KEY=${JEV_API_KEY:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - PORT=8080
@@ -18,10 +18,19 @@ services:
 
   mongodb:
     image: mongo:latest
+    environment:
+      # Root and the users below are created only on the first start with an empty volume.
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER:-root}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
+      - MONGO_APP_USER=${MONGO_APP_USER:-polymarket_app}
+      - MONGO_APP_PASSWORD=${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD in .env}
+      - MONGO_TEST_USER=${MONGO_TEST_USER:-polymarket_test}
+      - MONGO_TEST_PASSWORD=${MONGO_TEST_PASSWORD:?set MONGO_TEST_PASSWORD in .env}
     ports:
       - "127.0.0.1:27017:27017"
     volumes:
       - mongodb_data:/data/db
+      - ./docker/mongo-init:/docker-entrypoint-initdb.d:ro
     restart: unless-stopped
 
 volumes:

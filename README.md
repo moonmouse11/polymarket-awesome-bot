@@ -36,7 +36,7 @@
 ## Быстрый старт
 
 ```bash
-cp .env.example .env   # заполните ключи, если они есть
+cp .env.example .env   # задайте пароли MongoDB (см. ниже) и ключи, если они есть
 make up                # собрать и запустить бота + MongoDB
 make logs              # логи бота
 make down              # остановить
@@ -44,14 +44,29 @@ make down              # остановить
 
 `make help` показывает все команды.
 
-Порты бота (`8080`) и MongoDB (`27017`) опубликованы только на `127.0.0.1` — из локальной сети к ним не подключиться. У MongoDB пока нет пароля; перед развёртыванием в кластере он обязателен.
+Порты бота (`8080`) и MongoDB (`27017`) опубликованы только на `127.0.0.1` — из локальной сети к ним не подключиться.
 
-> ⚠️ `make clean` удаляет docker-volume с данными MongoDB. При следующем запуске ключевые слова будут засеяны заново из начального списка, все правки будут потеряны.
+> ⚠️ `make clean` удаляет docker-volume с данными MongoDB. При следующем запуске ключевые слова будут засеяны заново из начального списка, все правки будут потеряны. Пользователи MongoDB тоже создаются заново — из паролей, которые в этот момент записаны в `.env`.
+
+### Пароли MongoDB
+
+MongoDB запускается с проверкой пароля. Пользователи:
+
+| Пользователь | Права | Кто использует |
+|---|---|---|
+| `root` (`MONGO_ROOT_*`) | всё | только администрирование |
+| `polymarket_app` (`MONGO_APP_*`) | `readWrite` только на базу `polymarket` | бот |
+| `polymarket_test` (`MONGO_TEST_*`) | владелец только базы `polymarket_test` | тесты |
+
+- Пароли задаются в `.env`. Без них `docker compose` откажется стартовать.
+- Используйте пароли только из букв и цифр — они подставляются в строку подключения как есть: `openssl rand -hex 24`.
+- Пользователи создаются **один раз**, при первом запуске на пустом томе (`docker/mongo-init/01-users.js`). Если поменять пароль в `.env` позже, в базе он не изменится — нужно либо сменить его в MongoDB вручную, либо пересоздать том (`make clean`, данные будут удалены).
 
 ### Локальный запуск без Docker для бота
 
 ```bash
 docker compose up -d mongodb   # нужна только база
+set -a; . ./.env; set +a       # Go не читает .env сам — экспортируем переменные в shell
 go run ./cmd/bot
 ```
 
@@ -61,7 +76,11 @@ go run ./cmd/bot
 
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
-| `MONGO_URI` | `mongodb://localhost:27017` | Подключение к MongoDB (в Docker Compose — `mongodb://mongodb:27017`) |
+| `MONGO_URI` | `mongodb://localhost:27017` | Подключение бота к MongoDB под `polymarket_app`. В Docker Compose собирается автоматически из `MONGO_APP_*`; в `.env` нужен для `go run` |
+| `MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD` | `root` / — | Администратор MongoDB (пароль обязателен) |
+| `MONGO_APP_USER` / `MONGO_APP_PASSWORD` | `polymarket_app` / — | Пользователь бота (пароль обязателен) |
+| `MONGO_TEST_USER` / `MONGO_TEST_PASSWORD` | `polymarket_test` / — | Пользователь тестов (пароль обязателен) |
+| `MONGO_TEST_URI` | — | Подключение тестов `internal/db`; если пусто, тесты пропускаются |
 | `PORT` | `8080` | Порт health-check сервера |
 | `JEV_API_KEY` | — | Ключ AI-анализатора Jev; без него анализ идёт только по ключевым словам |
 | `TELEGRAM_BOT_TOKEN` | — | Зарезервировано под будущие уведомления, сейчас не используется |
@@ -96,24 +115,26 @@ go run ./cmd/bot
 
 Правки в БД переживают перезапуски. Слова пишутся в нижнем регистре. Пока анализатор использует встроенный список, а не слова из БД — переход запланирован.
 
-Посмотреть и поправить слова вручную:
+Посмотреть и поправить слова вручную (под пользователем бота; `MONGO_URI` из `.env` указывает на `localhost`, что внутри контейнера и есть сам MongoDB):
 
 ```bash
-docker compose exec mongodb mongosh polymarket --eval 'db.keywords.find({}, {_id: 0, word: 1})'
-docker compose exec mongodb mongosh polymarket --eval 'db.keywords.insertOne({word: "pope", created_at: new Date()})'
-docker compose exec mongodb mongosh polymarket --eval 'db.keywords.deleteOne({word: "boxing"})'
+set -a; . ./.env; set +a
+docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.keywords.find({}, {_id: 0, word: 1})'
+docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.keywords.insertOne({word: "pope", created_at: new Date()})'
+docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.keywords.deleteOne({word: "boxing"})'
 ```
 
 ## Тесты
 
-Тесты `internal/logger` и `internal/analyzer` внешних зависимостей не требуют. Тесты `internal/db` работают на настоящем MongoDB в отдельной базе `polymarket_test`. Она удаляется до и после тестов, рабочая база не затрагивается.
+Тесты `internal/logger` и `internal/analyzer` внешних зависимостей не требуют. Тесты `internal/db` работают на настоящем MongoDB под пользователем `polymarket_test` в отдельной базе `polymarket_test`. Она удаляется до и после тестов; к рабочей базе у тестового пользователя доступа нет.
 
 ```bash
 docker compose up -d mongodb
+set -a; . ./.env; set +a   # нужен MONGO_TEST_URI
 go test ./...
 ```
 
-Если MongoDB недоступен, эти тесты пропускаются (SKIP), а не падают.
+Если `MONGO_TEST_URI` не задан или MongoDB недоступен, эти тесты пропускаются (SKIP), а не падают.
 
 ## Структура проекта
 
@@ -122,6 +143,7 @@ cmd/bot/              точка входа: конфигурация, MongoDB, 
 internal/analyzer/    анализаторы: keyword, jev (заглушка), hybrid (keyword → jev)
 internal/db/          MongoDB: подключение, strange_markets, keywords
 internal/logger/      настройка zerolog из LOG_LEVEL / LOG_FORMAT
+docker/mongo-init/    создание пользователей MongoDB при первом запуске
 ```
 
 ## Заметки о Polymarket Gamma API

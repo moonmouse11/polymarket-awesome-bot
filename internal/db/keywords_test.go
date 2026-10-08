@@ -10,14 +10,14 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// newTestMongo connects to a real MongoDB (MONGO_URI, default localhost) and
+// newTestMongo connects to a real MongoDB as the test user (MONGO_TEST_URI) and
 // uses a throwaway database, so the bot's "polymarket" database is never touched.
 func newTestMongo(t *testing.T) *MongoDB {
 	t.Helper()
 
-	uri := os.Getenv("MONGO_URI")
+	uri := os.Getenv("MONGO_TEST_URI")
 	if uri == "" {
-		uri = "mongodb://localhost:27017"
+		t.Skip("MONGO_TEST_URI is not set; see README → Тесты")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
