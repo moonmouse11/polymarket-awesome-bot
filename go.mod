@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/rs/zerolog v1.35.1
 	go.mongodb.org/mongo-driver v1.17.10
-	golang.org/x/sync v0.8.0
+	golang.org/x/sync v0.23.0
 )
 
 require (
