@@ -1,4 +1,4 @@
-.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show
+.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show lint fmt test check
 
 .DEFAULT_GOAL := help
 
@@ -42,3 +42,20 @@ markets-find: ## Find markets by question text: make markets-find Q=alien
 markets-show: ## Show one full market document: make markets-show ID=559651
 	@test -n "$(ID)" || (echo "usage: make markets-show ID=559651" && exit 1)
 	@$(ENV); docker compose exec -T -e ID='$(ID)' mongodb mongosh --quiet "$$MONGO_URI" --eval 'printjson(db.markets.findOne({_id: process.env.ID}))'
+
+# --- Code quality (golangci-lint runs in Docker, same image as CI) ---
+# Pinned version: the same command must give the same result locally and in CI.
+LINT_IMAGE := golangci/golangci-lint:v2.14.0
+# Named volumes keep downloaded modules and lint cache between runs.
+LINT_CACHE := -v polymarket-lint-gomod:/go/pkg/mod -v polymarket-lint-cache:/root/.cache
+
+lint: ## Run linters (golangci-lint standard set + gofmt/goimports check)
+	docker run --rm $(LINT_CACHE) -v "$(CURDIR)":/app:ro -w /app $(LINT_IMAGE) golangci-lint run ./...
+
+fmt: ## Fix formatting in place (gofmt + goimports)
+	docker run --rm $(LINT_CACHE) -v "$(CURDIR)":/app -w /app $(LINT_IMAGE) golangci-lint fmt ./...
+
+test: ## Run all tests with race detector (DB tests use MONGO_TEST_URI from .env)
+	@$(ENV); go test -race ./...
+
+check: lint test ## Pre-commit check: lint + tests

@@ -27,7 +27,7 @@ func (j *JevAnalyzer) Analyze(ctx context.Context, event MarketEvent) (*Analysis
 	// For now, return a mock response or error
 	
 	return &AnalysisResult{
-		IsStrange:  false,
+		IsAwesome:  false,
 		Reason:     "Not implemented yet",
 		Confidence: 0.0,
 		AnalyzedBy: "jev",

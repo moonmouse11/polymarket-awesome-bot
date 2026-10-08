@@ -13,7 +13,7 @@ var DefaultKeywords = []string{
 	"conspiracy", "faked", "matrix", "boxing",
 }
 
-// KeywordAnalyzer uses predefined trigger words to catch obviously strange markets
+// KeywordAnalyzer uses predefined trigger words to catch obviously awesome markets
 type KeywordAnalyzer struct {
 	TriggerWords []string
 }
@@ -34,7 +34,7 @@ func (k *KeywordAnalyzer) Analyze(ctx context.Context, event MarketEvent) (*Anal
 	for _, word := range k.TriggerWords {
 		if strings.Contains(text, word) {
 			return &AnalysisResult{
-				IsStrange:  true,
+				IsAwesome:  true,
 				Reason:     "Found trigger word: " + word,
 				Confidence: 1.0,
 				AnalyzedBy: "keyword",
@@ -43,7 +43,7 @@ func (k *KeywordAnalyzer) Analyze(ctx context.Context, event MarketEvent) (*Anal
 	}
 	
 	return &AnalysisResult{
-		IsStrange:  false,
+		IsAwesome:  false,
 		Reason:     "No trigger words found",
 		Confidence: 1.0,
 		AnalyzedBy: "keyword",

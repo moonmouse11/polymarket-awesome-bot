@@ -21,8 +21,8 @@ func TestHybridAnalyzer_LogsWarningWhenJevFails(t *testing.T) {
 	if res == nil {
 		t.Fatal("expected non-nil result from keyword fallback")
 	}
-	if res.IsStrange || res.AnalyzedBy != "keyword" {
-		t.Fatalf("want keyword not-strange result, got %+v", res)
+	if res.IsAwesome || res.AnalyzedBy != "keyword" {
+		t.Fatalf("want keyword not-awesome result, got %+v", res)
 	}
 
 	var rec map[string]any
@@ -42,8 +42,8 @@ func TestHybridAnalyzer_KeywordMatchSkipsJev(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if !res.IsStrange || res.AnalyzedBy != "keyword" {
-		t.Fatalf("want keyword strange result, got %+v", res)
+	if !res.IsAwesome || res.AnalyzedBy != "keyword" {
+		t.Fatalf("want keyword awesome result, got %+v", res)
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("Jev should not be called (no log expected), got %q", buf.String())
@@ -73,7 +73,7 @@ func TestHybridAnalyzer_UsesDBTriggerWords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if !res.IsStrange {
+	if !res.IsAwesome {
 		t.Fatalf("expected DB trigger word match, got %+v", res)
 	}
 }

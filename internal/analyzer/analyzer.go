@@ -12,9 +12,9 @@ type MarketEvent struct {
 	Price       float64
 }
 
-// AnalysisResult contains the decision whether the event is strange/unexpected
+// AnalysisResult contains the decision whether the event is awesome (strange/unexpected)
 type AnalysisResult struct {
-	IsStrange   bool
+	IsAwesome   bool
 	Reason      string
 	Confidence  float64
 	AnalyzedBy  string // "keyword", "jev", or "groq_fallback"

@@ -30,7 +30,7 @@ func (h *HybridAnalyzer) Analyze(ctx context.Context, event MarketEvent) (*Analy
 	res, err := h.keywordAnalyzer.Analyze(ctx, event)
 	if err != nil {
 		h.log.Warn().Err(err).Str("analyzer", "keyword").Str("market_id", event.ID).Msg("analysis failed")
-	} else if res.IsStrange {
+	} else if res.IsAwesome {
 		// If keyword matched, return immediately
 		return res, nil
 	}

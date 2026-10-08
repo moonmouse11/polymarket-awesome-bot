@@ -44,7 +44,6 @@ func run(log zerolog.Logger) error {
 	if mongoURI == "" {
 		mongoURI = "mongodb://localhost:27017"
 	}
-	jevAPIKey := os.Getenv("JEV_API_KEY")
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080" // Default port for health checks (required by Replit/Render/etc)
@@ -80,8 +79,6 @@ func run(log zerolog.Logger) error {
 	}
 	log.Info().Int("count", len(keywordWords)).Msg("Loaded keywords from MongoDB")
 
-	hybridAnalyzer := analyzer.NewHybridAnalyzer(jevAPIKey, keywordWords, log)
-
 	// 4. Setup Error Group for managing concurrent tasks
 	g, gCtx := errgroup.WithContext(ctx)
 
@@ -115,71 +112,6 @@ func run(log zerolog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
-	})
-
-	// Task B: The Main Bot Worker (Mocked for now)
-	g.Go(func() error {
-		events := []analyzer.MarketEvent{
-			{ID: "1", Title: "Will aliens be found in 2026?", Description: "Finding extraterrestrial life.", Price: 0.05},
-			{ID: "2", Title: "Will Trump win the 2028 election?", Description: "US Presidential election.", Price: 0.45},
-			{ID: "3", Title: "Will Elon Musk buy a new platform?", Description: "Musk's next acquisition.", Price: 0.20},
-		}
-
-		for _, event := range events {
-			// Check if we need to shut down before processing the next event
-			select {
-			case <-gCtx.Done():
-				log.Info().Msg("Worker received shutdown signal, stopping event processing")
-				return nil
-			default:
-			}
-
-			eventLog := log.With().Str("market_id", event.ID).Logger()
-
-			analyzeCtx, cancelAnalyze := context.WithTimeout(gCtx, 5*time.Second)
-			res, err := hybridAnalyzer.Analyze(analyzeCtx, event)
-			cancelAnalyze()
-
-			if err != nil {
-				eventLog.Error().Err(err).Msg("Error analyzing event")
-				continue
-			}
-
-			if res.IsStrange {
-				eventLog.Info().
-					Str("title", event.Title).
-					Str("reason", res.Reason).
-					Str("analyzer", res.AnalyzedBy).
-					Msg("Found strange market")
-
-				saveCtx, cancelSave := context.WithTimeout(gCtx, 5*time.Second)
-				err = mongoDB.SaveMarketEvent(saveCtx, map[string]interface{}{
-					"event":     event,
-					"analysis":  res,
-					"timestamp": time.Now(),
-				})
-				cancelSave()
-
-				if err != nil {
-					eventLog.Error().Err(err).Msg("Failed to save to MongoDB")
-				} else {
-					eventLog.Info().Msg("Saved strange market to MongoDB")
-				}
-			} else {
-				eventLog.Info().Str("title", event.Title).Msg("Market is normal")
-			}
-
-			// Sleep with context awareness
-			select {
-			case <-gCtx.Done():
-				log.Info().Msg("Worker interrupted during sleep")
-				return nil
-			case <-time.After(2 * time.Second):
-			}
-		}
-
-		log.Info().Msg("Worker finished processing all mock events")
-		return nil
 	})
 
 	// 5. Wait for all tasks to finish or a fatal error to occur

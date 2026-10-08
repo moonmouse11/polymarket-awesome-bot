@@ -33,7 +33,7 @@ func NewMongoDB(ctx context.Context, uri, dbName string) (*MongoDB, error) {
 }
 
 func (m *MongoDB) SaveMarketEvent(ctx context.Context, event interface{}) error {
-	collection := m.db.Collection("strange_markets")
+	collection := m.db.Collection("awesome_markets")
 	_, err := collection.InsertOne(ctx, event)
 	return err
 }

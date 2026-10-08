@@ -1,0 +1,16 @@
+# golangci-lint v2 config. Run via Docker: make lint (check) / make fmt (fix formatting).
+version: "2"
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  # Show every issue (defaults hide repeats beyond 3 per text / 50 per linter).
+  max-same-issues: 0
+  max-issues-per-linter: 0
