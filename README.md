@@ -1,155 +1,141 @@
 # polymarket-awesome-bot
 
-Бот для исследования рынков [Polymarket](https://polymarket.com): находит «awesome» рынки — необычные, странные, заслуживающие внимания — и следит за их изменениями.
+[![CI](https://github.com/moonmouse11/polymarket-awesome-bot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moonmouse11/polymarket-awesome-bot/actions/workflows/ci.yml)
+[![Go version](https://img.shields.io/github/go-mod/go-version/moonmouse11/polymarket-awesome-bot)](go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Сейчас бот занимается только поиском и анализом рынков. Каналы уведомлений — отдельная будущая часть, и Telegram будет лишь одним из них.
+**English** | [Русский](README.ru.md)
 
-## Статус
+A bot that researches [Polymarket](https://polymarket.com) prediction markets: it finds *awesome* markets — unusual, strange, worth a closer look — and tracks how they change.
 
-Проект в ранней разработке.
+> [!NOTE]
+> The project is in early development. Right now it loads and stores markets; detection and notifications are planned. Notification channels are a separate future part, and Telegram will be only one of them.
 
-| Часть | Состояние |
+## Table of contents
+
+- [Status](#status)
+- [How it works](#how-it-works)
+- [Getting started](#getting-started)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Data model](#data-model)
+- [Logging](#logging)
+- [Project layout](#project-layout)
+- [Polymarket Gamma API notes](#polymarket-gamma-api-notes)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
+
+## Status
+
+| Feature | State |
 |---|---|
-| Health-check HTTP-сервер (`/health`) | ✅ работает |
-| Подключение к MongoDB, корректная остановка по сигналу | ✅ работает |
-| Коллекция ключевых слов `keywords` с начальным засевом | ✅ работает |
-| Анализ по ключевым словам (`KeywordAnalyzer`) | 🚧 код и тесты есть, в бот пока не подключён (ждёт решения по `is_awesome`) |
-| AI-анализатор Jev | 🚧 заглушка, ждёт ранний доступ к API |
-| Полная загрузка всех рынков (открытых и закрытых) в `markets` | ✅ работает, отдельной командой `make markets-load` |
-| Минутный опрос обновлений | 📋 запланировано; бот пока только подключается к MongoDB, готовит `keywords` и отвечает на `/health` |
-| Отслеживание изменений awesome-рынков | 📋 запланировано |
-| Уведомления (Telegram и другие каналы) | 📋 запланировано |
+| Full load of all markets (open and closed) into MongoDB | ✅ done, manual command `make markets-load` |
+| `keywords` collection with initial seed | ✅ done |
+| Health check (`/health`), graceful shutdown | ✅ done |
+| Keyword analyzer (`KeywordAnalyzer`) | 🚧 code and tests exist, not wired into the bot yet |
+| AI analyzer Jev | 🚧 stub, waiting for API early access |
+| Polling for updates every minute | 📋 planned |
+| Change detectors for awesome markets | 📋 planned |
+| Notifications (Telegram and other channels) | 📋 planned |
+| Market translations (English / Russian) | 📋 planned |
 
-## Как это будет работать
+## How it works
 
-Согласованный план (реализован шаг 1):
+1. **Initial load.** All markets — open first, then closed — are fetched page by page from the Gamma API and stored in MongoDB. Runs manually: `make markets-load`.
+2. **Updates** *(planned).* Once a minute the bot requests markets sorted by `updatedAt` and updates stored documents. The previous version of a document is the "before" state for comparison.
+3. **Awesome markets** *(planned).* A market is awesome when it matches a word from the `keywords` collection.
+4. **Detectors** *(planned).* Only for awesome markets that are still open: sharp price jumps, edits of the question or description, closing and resolution, volume spikes.
 
-1. **Первичная загрузка.** Все рынки — сначала открытые, затем закрытые — забираются из Gamma API постранично и сохраняются в MongoDB. Запускается вручную: `make markets-load`.
-2. **Обновления.** Раз в минуту бот запрашивает рынки, отсортированные по `updatedAt`, и обновляет записи в БД. Предыдущая версия записи служит состоянием «было» для сравнения. Историю цен пока не храним.
-3. **Awesome-рынки.** Рынок становится awesome, если в нём есть слово из коллекции `keywords`.
-4. **Детекторы.** Только для awesome-рынков, которые ещё открыты: резкий скачок цены, правка текста вопроса или описания, закрытие или разрешение рынка, всплеск объёма. Awesome-рынки дополнительно проверяются точечно, пачками по id.
+## Getting started
 
-## Требования
+### Requirements
 
-- Go 1.27+
-- Docker и Docker Compose — для запуска вместе с MongoDB
+- Docker with Docker Compose
+- Go 1.27+ — only for `make markets-load` and running the bot outside Docker
+- `make`
 
-## Быстрый старт
+### Run
 
 ```bash
-cp .env.example .env   # задайте пароли MongoDB (см. ниже) и ключи, если они есть
-make up                # собрать и запустить бота + MongoDB
-make logs              # логи бота
-make down              # остановить
+git clone https://github.com/moonmouse11/polymarket-awesome-bot.git
+cd polymarket-awesome-bot
+cp .env.example .env   # set MongoDB passwords, see below
+make up                # build and start the bot + MongoDB
+make logs              # follow bot logs
+make down              # stop
 ```
 
-`make help` показывает все команды.
+Check that the bot is alive:
 
-Порты бота (`8080`) и MongoDB (`27017`) опубликованы только на `127.0.0.1` — из локальной сети к ним не подключиться.
+```bash
+curl http://127.0.0.1:8080/health   # OK
+```
 
-> ⚠️ `make clean` удаляет docker-volume с данными MongoDB. При следующем запуске ключевые слова будут засеяны заново из начального списка, все правки будут потеряны. Пользователи MongoDB тоже создаются заново — из паролей, которые в этот момент записаны в `.env`.
+`make help` lists all commands.
 
-### Пароли MongoDB
+> [!WARNING]
+> `make clean` deletes the MongoDB data volume: all loaded markets and keyword edits are lost. MongoDB users are recreated from the passwords currently in `.env`.
 
-MongoDB запускается с проверкой пароля. Пользователи:
+### MongoDB users
 
-| Пользователь | Права | Кто использует |
+MongoDB runs with authentication. Users are created **once**, on the first start with an empty volume (`docker/mongo-init/01-users.js`):
+
+| User | Permissions | Used by |
 |---|---|---|
-| `root` (`MONGO_ROOT_*`) | всё | только администрирование |
-| `polymarket_app` (`MONGO_APP_*`) | `readWrite` только на базу `polymarket` | бот |
-| `polymarket_test` (`MONGO_TEST_*`) | владелец только базы `polymarket_test` | тесты |
+| `root` (`MONGO_ROOT_*`) | everything | administration only |
+| `polymarket_app` (`MONGO_APP_*`) | `readWrite` on `polymarket` only | the bot |
+| `polymarket_test` (`MONGO_TEST_*`) | owner of `polymarket_test` only | tests |
 
-- Пароли задаются в `.env`. Без них `docker compose` откажется стартовать.
-- Используйте пароли только из букв и цифр — они подставляются в строку подключения как есть: `openssl rand -hex 24`.
-- Пользователи создаются **один раз**, при первом запуске на пустом томе (`docker/mongo-init/01-users.js`). Если поменять пароль в `.env` позже, в базе он не изменится — нужно либо сменить его в MongoDB вручную, либо пересоздать том (`make clean`, данные будут удалены).
+- Docker Compose refuses to start without the passwords in `.env`.
+- Use letters and digits only — passwords go into connection strings as is: `openssl rand -hex 24`.
+- Changing a password in `.env` later does not change it in the database: change it in MongoDB by hand or recreate the volume.
 
-### Локальный запуск без Docker для бота
+Ports of the bot (`8080`) and MongoDB (`27017`) are published on `127.0.0.1` only and are not reachable from the network.
 
-```bash
-docker compose up -d mongodb   # нужна только база
-set -a; . ./.env; set +a       # Go не читает .env сам — экспортируем переменные в shell
-go run ./cmd/bot
-```
+## Configuration
 
-## Конфигурация
+The bot is configured with environment variables. Docker Compose takes them from `.env`; Go itself does not read `.env`.
 
-Переменные окружения:
-
-| Переменная | По умолчанию | Назначение |
+| Variable | Default | Description |
 |---|---|---|
-| `MONGO_URI` | `mongodb://localhost:27017` | Подключение бота к MongoDB под `polymarket_app`. В Docker Compose собирается автоматически из `MONGO_APP_*`; в `.env` нужен для `go run` |
-| `MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD` | `root` / — | Администратор MongoDB (пароль обязателен) |
-| `MONGO_APP_USER` / `MONGO_APP_PASSWORD` | `polymarket_app` / — | Пользователь бота (пароль обязателен) |
-| `MONGO_TEST_USER` / `MONGO_TEST_PASSWORD` | `polymarket_test` / — | Пользователь тестов (пароль обязателен) |
-| `MONGO_TEST_URI` | — | Подключение тестов `internal/db`; если пусто, тесты пропускаются |
-| `PORT` | `8080` | Порт health-check сервера |
-| `JEV_API_KEY` | — | Ключ AI-анализатора Jev; пока не используется — анализатор не подключён к боту |
-| `TELEGRAM_BOT_TOKEN` | — | Зарезервировано под будущие уведомления, сейчас не используется |
-| `LOG_LEVEL` | `info` | Уровень логов: `debug`, `info`, `warn`, `error` |
-| `LOG_FORMAT` | `json` | `json` — для сбора логов в кластере, `console` — цветной читаемый вывод для локальной работы |
+| `MONGO_URI` | `mongodb://localhost:27017` | Bot connection to MongoDB as `polymarket_app`. Docker Compose builds it from `MONGO_APP_*`; needed in `.env` for `go run` |
+| `MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD` | `root` / — | MongoDB administrator (password required) |
+| `MONGO_APP_USER` / `MONGO_APP_PASSWORD` | `polymarket_app` / — | Bot user (password required) |
+| `MONGO_TEST_USER` / `MONGO_TEST_PASSWORD` | `polymarket_test` / — | Test user (password required) |
+| `MONGO_TEST_URI` | — | Connection for `internal/db` tests |
+| `PORT` | `8080` | Health check server port |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `LOG_FORMAT` | `json` | `json` for log collection, `console` for readable local output |
+| `JEV_API_KEY` | — | Reserved for the Jev analyzer, not used yet |
+| `TELEGRAM_BOT_TOKEN` | — | Reserved for notifications, not used yet |
 
-## Логи
+An invalid `LOG_LEVEL` or `LOG_FORMAT` stops the bot at startup.
 
-Логи — основной способ видеть работу бота и его ошибки. Бот пишет их в stdout через [zerolog](https://github.com/rs/zerolog), каждая запись — набор полей (`level`, `time`, `message`, `market_id`, `analyzer`, `error`…):
+## Usage
 
-```json
-{"level":"warn","analyzer":"jev","market_id":"2","error":"Jev API key is missing (waiting for early access)","time":"2026-10-08T12:00:00+05:00","message":"analysis skipped or failed"}
-```
-
-Смотреть локально: `make logs` (только когда контейнер `bot` запущен — `make up`). Неверное значение `LOG_LEVEL` или `LOG_FORMAT` не даёт боту стартовать. При фатальной ошибке бот пишет её в лог и выходит с кодом 1.
-
-### Логи загрузки рынков
-
-`make markets-load` запускается на хосте, а не в Docker, поэтому его логи идут прямо в терминал (в `make logs` их нет).
-
-| Уровень | Что пишется |
-|---|---|
-| `error` | Загрузка упала: какой проход (`closed`), сколько страниц и рынков успели записать, причина |
-| `warn` | Неудачная попытка запроса к Polymarket перед повтором: `attempt`, `max_attempts`, `status` или `error`, `retry_in` |
-| `info` | Начало и конец прохода (итог и время), прогресс каждые 10 страниц |
-| `debug` | Каждая страница: `page`, `markets`, `took` |
-
-Подробный режим: `LOG_LEVEL=debug make markets-load`. Курсор пагинации и `MONGO_URI` (в нём пароль) в логи не пишутся.
-
-## Данные (MongoDB)
-
-База: `polymarket`.
-
-| Коллекция | Что хранит |
-|---|---|
-| `keywords` | Ключевые слова для определения awesome-рынков: `{ word, created_at }`, уникальный индекс по `word` |
-| `markets` | Все рынки Polymarket. `_id` — id рынка в Polymarket, поэтому повторная загрузка перезаписывает документ, а не создаёт дубликат. Индексы: `updated_at`, `closed`, `tags` |
-| `awesome_markets` | Рынки, которые анализатор посчитал awesome (пока пустая: анализ рынков из `markets` ещё не подключён) |
-
-### Рынки
+### Loading and exploring markets
 
 ```bash
-make markets-load               # полная загрузка: открытые, потом закрытые (идёт долго)
-make markets-count              # сколько всего / закрытых / активных, время последней записи
-make markets-sample             # 3 последних обновлённых рынка
-make markets-find Q=alien       # поиск по тексту вопроса (регистр не важен), до 20 штук
-make markets-show ID=559651     # полный документ рынка
+make markets-load               # full load: open, then closed markets (takes a while)
+make markets-count              # total / closed / active, time of the last write
+make markets-sample             # 3 most recently updated markets
+make markets-find Q=alien       # search question text (case-insensitive), up to 20
+make markets-show ID=559651     # full market document
 ```
 
-Команды читают `MONGO_URI` из `.env` и запускают `mongosh` внутри контейнера `mongodb`. Произвольный запрос:
+The load runs on the host, not in Docker, and needs Go. It is safe to rerun: markets are keyed by their Polymarket id, so a reload overwrites documents instead of duplicating them. If a load is interrupted, the pages already written stay — just run it again. A full load takes about 1.8 GB of MongoDB disk space.
+
+These commands read `MONGO_URI` from `.env` and run `mongosh` inside the `mongodb` container. Any query:
 
 ```bash
 set -a; . ./.env; set +a
 docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.markets.find({tags: "Politics", closed: false}).limit(5)'
 ```
 
-Если загрузка оборвалась (сеть, Ctrl+C), уже записанные страницы остаются — просто запустите её ещё раз. Какие поля хранятся, задано в `internal/polymarket/market.go`: чтобы добавить поле API, допишите его в `apiMarket`, `Market` и `toMarket`.
+### Keywords
 
-### Ключевые слова
-
-При каждом старте бот:
-
-1. создаёт уникальный индекс по `word`, если его ещё нет;
-2. засевает начальный список (`analyzer.DefaultKeywords`, 15 слов) **только если коллекция пустая**.
-
-Правки в БД переживают перезапуски. Слова пишутся в нижнем регистре. Пока анализатор использует встроенный список, а не слова из БД — переход запланирован.
-
-Посмотреть и поправить слова вручную (под пользователем бота; `MONGO_URI` из `.env` указывает на `localhost`, что внутри контейнера и есть сам MongoDB):
+On every start the bot creates a unique index on `word` and seeds the initial list (`analyzer.DefaultKeywords`) **only if the collection is empty**, so edits in the database survive restarts. Words are stored in lowercase.
 
 ```bash
 set -a; . ./.env; set +a
@@ -158,86 +144,71 @@ docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.keywords.insertOne({
 docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.keywords.deleteOne({word: "boxing"})'
 ```
 
-## Тесты
+## Data model
 
-Тесты `internal/logger` и `internal/analyzer` внешних зависимостей не требуют. Тесты `internal/db` работают на настоящем MongoDB под пользователем `polymarket_test` в отдельной базе `polymarket_test`. Она удаляется до и после тестов; к рабочей базе у тестового пользователя доступа нет.
+Database `polymarket`:
 
-```bash
-docker compose up -d mongodb
-set -a; . ./.env; set +a   # нужен MONGO_TEST_URI
-go test ./...
-```
-
-Если `MONGO_TEST_URI` не задан или MongoDB недоступен, эти тесты локально пропускаются (SKIP), а не падают. В CI (переменная `CI` задана) они в этом случае **падают** — чтобы сломанная база не превратилась в зелёную проверку без тестов.
-
-## Проверка кода
-
-Перед коммитом: `make check` (линтер + тесты). Команды по отдельности:
-
-```bash
-make lint    # golangci-lint: линтеры + проверка форматирования (файлы не меняет)
-make fmt     # исправить форматирование (gofmt + goimports) прямо в файлах
-make test    # go test -race ./... с MONGO_TEST_URI из .env
-make check   # lint + test
-```
-
-`golangci-lint` запускается в Docker-образе `golangci/golangci-lint` — локально ничего ставить не нужно. Версия (сейчас `v2.14.0`) записана в одном месте, в файле `.golangci-lint-version`: его читают и `Makefile`, и CI, поэтому локальная проверка и проверка в PR совпадают. Dependabot этот файл не обновляет — новую версию линтера ставят вручную. Модули и кэш линтера хранятся в Docker-томах `polymarket-lint-gomod` и `polymarket-lint-cache`: первый запуск ~40 с, следующие ~1–2 с. Конфиг — `.golangci.yml`.
-
-Стандартный набор линтеров:
-
-| Линтер | Что ищет |
+| Collection | Contents |
 |---|---|
-| `govet` | Подозрительный код из `go vet`: неверные `Printf`-форматы, копирование мьютексов, битые теги структур |
-| `staticcheck` | Баги, устаревшие API, упрощения, стиль (например, текст ошибки с заглавной буквы — `ST1005`) |
-| `errcheck` | Непроверенные ошибки. Сознательно игнорируемую ошибку пишут явно: `_ = f()` |
-| `ineffassign` | Присваивания, результат которых никогда не читается |
-| `unused` | Неиспользуемые неэкспортируемые функции, типы, переменные |
-| `gofmt`, `goimports` | Форматирование и порядок импортов |
+| `markets` | All Polymarket markets. `_id` is the Polymarket market id. Indexes: `updated_at`, `closed`, `tags` |
+| `keywords` | Words that make a market awesome: `{ word, created_at }`, unique index on `word` |
+| `awesome_markets` | Reserved for markets marked as awesome (empty for now) |
 
-## CI (GitHub Actions)
+Stored market fields are defined in [`internal/polymarket/market.go`](internal/polymarket/market.go). To add a field from the API, add it to `apiMarket`, `Market` and `toMarket`.
 
-`.github/workflows/ci.yml` запускается на каждый PR и на каждый push в `main`. Три параллельные проверки:
+## Logging
 
-| Job | Что делает |
+Logs are written to stdout with [zerolog](https://github.com/rs/zerolog) as structured records:
+
+```json
+{"level":"info","closed":false,"pages":10,"markets":1000,"time":"2026-10-08T12:00:00Z","message":"Loading markets"}
+```
+
+Bot logs: `make logs`. Market load logs go straight to the terminal:
+
+| Level | What is logged |
 |---|---|
-| `lint` | `golangci-lint-action` с версией из `.golangci-lint-version`; замечания видны прямо в diff PR |
-| `test` | `go test -race -count=1 ./...` с MongoDB `9.0.2` в service container; пользователь `polymarket_test` создаётся отдельным шагом (как в `docker/mongo-init/01-users.js`) |
-| `build` | `docker build` — проверяет, что образ собирается; никуда не публикуется |
+| `error` | The load failed: which pass, pages and markets written so far, the cause |
+| `warn` | A failed request to Polymarket before a retry: `attempt`, `max_attempts`, `status` or `error`, `retry_in` |
+| `info` | Start and end of each pass, progress every 10 pages |
+| `debug` | Every page: `page`, `markets`, `took` |
 
-Версии actions закреплены по SHA коммита (тег можно передвинуть, SHA — нет). `.github/dependabot.yml` раз в неделю открывает PR с обновлениями Go-модулей, образов в `Dockerfile` и `docker-compose.yml` и самих actions; каждый такой PR проходит CI.
+Verbose mode: `LOG_LEVEL=debug make markets-load`. Pagination cursors and `MONGO_URI` (it contains a password) are never logged.
 
-Деплоя пока нет: он появится после выбора сервера.
-
-## Структура проекта
+## Project layout
 
 ```
-cmd/bot/              точка входа: конфигурация, MongoDB, keywords, health-check
-internal/analyzer/    анализаторы: keyword, jev (заглушка), hybrid (keyword → jev)
-cmd/load-markets/     команда полной загрузки рынков (make markets-load)
-internal/polymarket/  клиент Gamma API: /markets/keyset, повторы при ошибках, модель Market
-internal/db/          MongoDB: подключение, markets, awesome_markets, keywords
-internal/logger/      настройка zerolog из LOG_LEVEL / LOG_FORMAT
-docker/mongo-init/    создание пользователей MongoDB при первом запуске
-.github/              CI (workflows/ci.yml) и Dependabot
+cmd/bot/              bot entry point: config, MongoDB, keywords, health check
+cmd/load-markets/     full market load (make markets-load)
+internal/polymarket/  Gamma API client: /markets/keyset, retries, Market model
+internal/db/          MongoDB: connection, markets, keywords, awesome_markets
+internal/analyzer/    analyzers: keyword, jev (stub), hybrid (keyword → jev)
+internal/logger/      zerolog setup from LOG_LEVEL / LOG_FORMAT
+docker/mongo-init/    MongoDB users created on first start
 ```
 
-### Сборка образа
+## Polymarket Gamma API notes
 
-`.dockerignore` — белый список: в Docker-сборку попадают только `go.mod`, `go.sum`, `cmd/` и `internal/` (без `*_test.go`). `.env`, `.git` и бинарники в образ не попадают. **Новую папку с кодом нужно добавить в `.dockerignore`**, иначе `docker build` упадёт с ошибкой о ненайденном пакете.
+Verified against `https://gamma-api.polymarket.com` (October 2026):
 
-Бот в контейнере работает от непривилегированного пользователя (UID 10001), а не от root.
+- The API is public, no key needed.
+- About 4.16 million markets: ~266k open and ~3.89M closed.
+- Without `closed` only open markets are returned; `closed=true` returns only closed ones. Open and closed markets cannot be fetched in one request. This also applies to lookups by id.
+- `/markets` returns at most 100 markets per request, and `offset` stops working after a few thousand records. A full scan needs `/markets/keyset` with `after_cursor`.
+- `/markets?id=1&id=2&…` returns up to 100 markets by id; `/markets/{id}` returns a market in any status.
+- There is no `category` field. Tags come with `include_tag=true`.
+- `outcomes` and `outcomePrices` are JSON arrays encoded as strings: `"[\"0.007\", \"0.993\"]"`.
+- `closed` is the reliable closing flag. `endDate` is not: markets may close earlier or stay open after it.
+- `?locale=ru` (and other languages) translates `question`, `outcomes` and the event title, but not `description`. Coverage is partial.
 
-Версии образов закреплены точно, `latest` не используется: `golang:1.27.2-alpine3.24` (сборка), `alpine:3.24.2` (запуск), `mongo:9.0.2`. Обновлять версии нужно вручную и осознанно. Для MongoDB переход на новую мажорную версию требует подготовки (`featureCompatibilityVersion`), просто сменить тег нельзя.
+## Contributing
 
-## Заметки о Polymarket Gamma API
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, tests and checks. Run `make check` before opening a pull request.
 
-Проверено запросами к `https://gamma-api.polymarket.com`:
+## Security
 
-- API публичный, ключ не нужен.
-- Рынков около 4,16 млн: открытых ~266 тыс., закрытых ~3,89 млн (октябрь 2026). Полная загрузка занимает ~1,8 ГБ на диске Mongo. `/markets/keyset` с `closed=true` отдаёт только закрытые — открытые и закрытые одним запросом не получить.
-- `/markets` отдаёт максимум 100 рынков за запрос. `offset` перестаёт работать после нескольких тысяч записей — для полного обхода нужен `/markets/keyset` с параметром `after_cursor`.
-- Без параметра `closed` возвращаются только открытые рынки, `closed=true` — только закрытые. Это относится и к выборке по id.
-- `/markets?id=1&id=2&…` возвращает до 100 рынков по id за один запрос. `/markets/{id}` возвращает рынок в любом статусе.
-- Поля `category` нет. Теги приходят с параметром `include_tag=true`.
-- `outcomes` и `outcomePrices` — JSON-массивы, закодированные в строку: `"[\"0.007\", \"0.993\"]"`.
-- `endDate` не гарантирует закрытие: рынок может закрыться раньше.
+Please do not report vulnerabilities in public issues. See [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE) © moonmouse11

@@ -16,6 +16,14 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Patches only. A new major or minor release changes the data file format
+      # (featureCompatibilityVersion): CI tests on an empty DB stay green, but the
+      # existing volume may fail to start. Upgrade MongoDB by hand, step by step.
+      - dependency-name: mongo
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
 
   - package-ecosystem: github-actions # SHAs in .github/workflows
     directory: /
