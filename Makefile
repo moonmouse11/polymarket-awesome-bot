@@ -45,7 +45,8 @@ markets-show: ## Show one full market document: make markets-show ID=559651
 
 # --- Code quality (golangci-lint runs in Docker, same image as CI) ---
 # Pinned version: the same command must give the same result locally and in CI.
-LINT_IMAGE := golangci/golangci-lint:v2.14.0
+# Single source of the linter version, shared with golangci-lint-action in CI.
+LINT_IMAGE := golangci/golangci-lint:$(shell cat .golangci-lint-version)
 # Named volumes keep downloaded modules and lint cache between runs.
 LINT_CACHE := -v polymarket-lint-gomod:/go/pkg/mod -v polymarket-lint-cache:/root/.cache
 

@@ -1,0 +1,23 @@
+version: 2
+# Weekly PRs for pinned versions; CI checks each one.
+# Not covered: golangci-lint version in .golangci-lint-version — bump by hand.
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker # Dockerfile: golang, alpine
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker-compose # docker-compose.yml: mongo
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions # SHAs in .github/workflows
+    directory: /
+    schedule:
+      interval: weekly

@@ -168,7 +168,7 @@ set -a; . ./.env; set +a   # нужен MONGO_TEST_URI
 go test ./...
 ```
 
-Если `MONGO_TEST_URI` не задан или MongoDB недоступен, эти тесты пропускаются (SKIP), а не падают.
+Если `MONGO_TEST_URI` не задан или MongoDB недоступен, эти тесты локально пропускаются (SKIP), а не падают. В CI (переменная `CI` задана) они в этом случае **падают** — чтобы сломанная база не превратилась в зелёную проверку без тестов.
 
 ## Проверка кода
 
@@ -181,7 +181,7 @@ make test    # go test -race ./... с MONGO_TEST_URI из .env
 make check   # lint + test
 ```
 
-`golangci-lint` запускается в Docker-образе `golangci/golangci-lint:v2.14.0` — локально ничего ставить не нужно, тот же образ подойдёт для CI. Версия закреплена, чтобы результат не менялся сам по себе. Модули и кэш линтера хранятся в Docker-томах `polymarket-lint-gomod` и `polymarket-lint-cache`: первый запуск ~40 с, следующие ~1–2 с. Конфиг — `.golangci.yml`.
+`golangci-lint` запускается в Docker-образе `golangci/golangci-lint` — локально ничего ставить не нужно. Версия (сейчас `v2.14.0`) записана в одном месте, в файле `.golangci-lint-version`: его читают и `Makefile`, и CI, поэтому локальная проверка и проверка в PR совпадают. Dependabot этот файл не обновляет — новую версию линтера ставят вручную. Модули и кэш линтера хранятся в Docker-томах `polymarket-lint-gomod` и `polymarket-lint-cache`: первый запуск ~40 с, следующие ~1–2 с. Конфиг — `.golangci.yml`.
 
 Стандартный набор линтеров:
 
@@ -194,6 +194,20 @@ make check   # lint + test
 | `unused` | Неиспользуемые неэкспортируемые функции, типы, переменные |
 | `gofmt`, `goimports` | Форматирование и порядок импортов |
 
+## CI (GitHub Actions)
+
+`.github/workflows/ci.yml` запускается на каждый PR и на каждый push в `main`. Три параллельные проверки:
+
+| Job | Что делает |
+|---|---|
+| `lint` | `golangci-lint-action` с версией из `.golangci-lint-version`; замечания видны прямо в diff PR |
+| `test` | `go test -race -count=1 ./...` с MongoDB `9.0.2` в service container; пользователь `polymarket_test` создаётся отдельным шагом (как в `docker/mongo-init/01-users.js`) |
+| `build` | `docker build` — проверяет, что образ собирается; никуда не публикуется |
+
+Версии actions закреплены по SHA коммита (тег можно передвинуть, SHA — нет). `.github/dependabot.yml` раз в неделю открывает PR с обновлениями Go-модулей, образов в `Dockerfile` и `docker-compose.yml` и самих actions; каждый такой PR проходит CI.
+
+Деплоя пока нет: он появится после выбора сервера.
+
 ## Структура проекта
 
 ```
@@ -204,6 +218,7 @@ internal/polymarket/  клиент Gamma API: /markets/keyset, повторы п
 internal/db/          MongoDB: подключение, markets, awesome_markets, keywords
 internal/logger/      настройка zerolog из LOG_LEVEL / LOG_FORMAT
 docker/mongo-init/    создание пользователей MongoDB при первом запуске
+.github/              CI (workflows/ci.yml) и Dependabot
 ```
 
 ### Сборка образа

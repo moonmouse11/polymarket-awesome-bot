@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to the same PR cancels the outdated run; runs on main always finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Actions are pinned by commit SHA (tags can be moved); Dependabot bumps them.
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          # Same file the Makefile reads, so local `make lint` and CI use one version.
+          version-file: .golangci-lint-version
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:9.0.2
+        env:
+          # Throwaway database that lives only for this job: not a secret.
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: ci-root
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1})'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      MONGO_TEST_URI: mongodb://polymarket_test:ci-test@localhost:27017/polymarket_test?authSource=polymarket_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Same least-privilege test user as docker/mongo-init/01-users.js
+      # (services start before checkout, so the init script cannot be mounted).
+      - name: Create test user
+        run: |
+          docker exec ${{ job.services.mongodb.id }} mongosh --quiet \
+            -u root -p ci-root --authenticationDatabase admin \
+            --eval 'db.getSiblingDB("polymarket_test").createUser({user: "polymarket_test", pwd: "ci-test", roles: [{role: "dbOwner", db: "polymarket_test"}]})'
+      # CI=true makes DB tests fail instead of skipping when MongoDB is unreachable.
+      - run: go test -race -count=1 ./...
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build image (not pushed)
+        run: docker build -t polymarket-bot:ci .
