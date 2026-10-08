@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -22,13 +24,15 @@ type Client struct {
 	baseURL    string
 	http       *http.Client
 	retryDelay time.Duration
+	log        zerolog.Logger
 }
 
-func NewClient(baseURL string) *Client {
+func NewClient(baseURL string, log zerolog.Logger) *Client {
 	return &Client{
 		baseURL:    baseURL,
 		http:       &http.Client{Timeout: 15 * time.Second},
 		retryDelay: 2 * time.Second,
+		log:        log.With().Str("component", "polymarket").Logger(),
 	}
 }
 
@@ -50,7 +54,7 @@ func (c *Client) MarketsPage(ctx context.Context, closed bool, cursor string) ([
 	}
 
 	var page keysetPage
-	if err := c.getJSON(ctx, "/markets/keyset?"+q.Encode(), &page); err != nil {
+	if err := c.getJSON(ctx, "/markets/keyset", q, &page); err != nil {
 		return nil, "", err
 	}
 
@@ -75,11 +79,18 @@ func (c *Client) MarketsPage(ctx context.Context, closed bool, cursor string) ([
 // API or from fn.
 func (c *Client) AllMarkets(ctx context.Context, closed bool, fn func(page []Market) error) error {
 	cursor := ""
-	for {
+	for pageNum := 1; ; pageNum++ {
+		started := time.Now()
 		markets, next, err := c.MarketsPage(ctx, closed, cursor)
 		if err != nil {
-			return err
+			return fmt.Errorf("page %d: %w", pageNum, err)
 		}
+		c.log.Debug().
+			Bool("closed", closed).
+			Int("page", pageNum).
+			Int("markets", len(markets)).
+			Dur("took", time.Since(started)).
+			Msg("Markets page fetched")
 		if len(markets) > 0 {
 			if err := fn(markets); err != nil {
 				return err
@@ -92,31 +103,62 @@ func (c *Client) AllMarkets(ctx context.Context, closed bool, fn func(page []Mar
 	}
 }
 
-// errRetryable marks failures worth another attempt (network, 429, 5xx).
-var errRetryable = errors.New("retryable")
-
-func (c *Client) getJSON(ctx context.Context, path string, dst any) error {
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if attempt > 1 {
-			// Exponential backoff: retryDelay, 2x, 4x, 8x.
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(c.retryDelay << (attempt - 2)):
-			}
-		}
-
-		lastErr = c.getOnce(ctx, path, dst)
-		if lastErr == nil || !errors.Is(lastErr, errRetryable) {
-			return lastErr
-		}
-	}
-	return fmt.Errorf("after %d attempts: %w", maxAttempts, lastErr)
+// retryableError is a failure worth another attempt (network error, 429, 5xx).
+type retryableError struct {
+	status int   // HTTP status, 0 for network errors
+	err    error // network error, nil for bad statuses
 }
 
-func (c *Client) getOnce(ctx context.Context, path string, dst any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+func (e *retryableError) Error() string {
+	if e.err != nil {
+		return e.err.Error()
+	}
+	return fmt.Sprintf("status %d", e.status)
+}
+
+func (e *retryableError) Unwrap() error { return e.err }
+
+// getJSON requests path with query and decodes the JSON response into dst,
+// retrying retryable failures with exponential backoff. Errors mention only
+// the path: the query holds a long keyset cursor that is useless in logs.
+func (c *Client) getJSON(ctx context.Context, path string, query url.Values, dst any) error {
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		lastErr = c.getOnce(ctx, path, query, dst)
+
+		var retryable *retryableError
+		if lastErr == nil || !errors.As(lastErr, &retryable) {
+			return lastErr
+		}
+		if attempt == maxAttempts {
+			break
+		}
+
+		// Exponential backoff: retryDelay, 2x, 4x, 8x.
+		delay := c.retryDelay << (attempt - 1)
+		ev := c.log.Warn().
+			Str("path", path).
+			Int("attempt", attempt).
+			Int("max_attempts", maxAttempts).
+			Dur("retry_in", delay)
+		if retryable.status != 0 {
+			ev = ev.Int("status", retryable.status)
+		} else {
+			ev = ev.Err(retryable.err)
+		}
+		ev.Msg("Polymarket request failed, retrying")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	return fmt.Errorf("GET %s: after %d attempts: %w", path, maxAttempts, lastErr)
+}
+
+func (c *Client) getOnce(ctx context.Context, path string, query url.Values, dst any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path+"?"+query.Encode(), nil)
 	if err != nil {
 		return err
 	}
@@ -126,12 +168,17 @@ func (c *Client) getOnce(ctx context.Context, path string, dst any) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("GET %s: %w: %w", path, errRetryable, err)
+		// *url.Error repeats the full URL (with the cursor); keep only the cause.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return &retryableError{err: err}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-		return fmt.Errorf("GET %s: status %d: %w", path, resp.StatusCode, errRetryable)
+		return &retryableError{status: resp.StatusCode}
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))

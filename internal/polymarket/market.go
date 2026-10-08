@@ -25,6 +25,12 @@ type Market struct {
 	Archived        bool `bson:"archived"`
 	AcceptingOrders bool `bson:"accepting_orders"`
 
+	// Closing and resolution: closed is the authoritative flag; resolution
+	// (who won) comes later via the UMA oracle or automatically.
+	ClosedTime            *time.Time `bson:"closed_time,omitempty"`
+	UMAResolutionStatus   string     `bson:"uma_resolution_status,omitempty"` // "", "proposed", "resolved", ...
+	AutomaticallyResolved bool       `bson:"automatically_resolved"`
+
 	CreatedAt *time.Time `bson:"created_at,omitempty"`
 	UpdatedAt *time.Time `bson:"updated_at,omitempty"`
 	StartDate *time.Time `bson:"start_date,omitempty"`
@@ -54,6 +60,9 @@ type apiMarket struct {
 	Closed          bool    `json:"closed"`
 	Archived        bool    `json:"archived"`
 	AcceptingOrders bool    `json:"acceptingOrders"`
+	ClosedTime      string  `json:"closedTime"` // "2021-07-08 22:21:47+00", not RFC 3339
+	UMAStatus       string  `json:"umaResolutionStatus"`
+	AutoResolved    bool    `json:"automaticallyResolved"`
 	CreatedAt       string  `json:"createdAt"`
 	UpdatedAt       string  `json:"updatedAt"`
 	StartDate       string  `json:"startDate"`
@@ -84,6 +93,7 @@ func (a apiMarket) toMarket() (Market, error) {
 		Closed:          a.Closed,
 		Archived:        a.Archived,
 		AcceptingOrders: a.AcceptingOrders,
+		ClosedTime:      parseTime(a.ClosedTime),
 		CreatedAt:       parseTime(a.CreatedAt),
 		UpdatedAt:       parseTime(a.UpdatedAt),
 		StartDate:       parseTime(a.StartDate),
@@ -93,6 +103,9 @@ func (a apiMarket) toMarket() (Market, error) {
 		Liquidity:       a.LiquidityNum,
 		LastTradePrice:  a.LastTradePrice,
 		Tags:            make([]string, 0, len(a.Tags)),
+
+		UMAResolutionStatus:   a.UMAStatus,
+		AutomaticallyResolved: a.AutoResolved,
 	}
 	for _, t := range a.Tags {
 		m.Tags = append(m.Tags, t.Label)
@@ -124,16 +137,24 @@ func (a apiMarket) toMarket() (Market, error) {
 	return m, nil
 }
 
+// timeLayouts are the timestamp formats seen in the Gamma API: RFC 3339 for
+// most dates, a Postgres-style format for closedTime.
+var timeLayouts = []string{
+	time.RFC3339Nano,                   // 2025-07-03T20:25:56.889606Z
+	"2006-01-02 15:04:05.999999999-07", // 2026-10-08 13:51:30.336956+00
+}
+
 // parseTime returns nil for empty or unparseable timestamps: dates are
 // informational and a bad one should not drop the whole market.
 func parseTime(s string) *time.Time {
 	if s == "" {
 		return nil
 	}
-	t, err := time.Parse(time.RFC3339Nano, s)
-	if err != nil {
-		return nil
+	for _, layout := range timeLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			t = t.UTC()
+			return &t
+		}
 	}
-	t = t.UTC()
-	return &t
+	return nil
 }

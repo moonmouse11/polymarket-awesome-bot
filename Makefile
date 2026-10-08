@@ -26,7 +26,8 @@ ENV := set -a; . ./.env; set +a
 MONGOSH := docker compose exec -T mongodb mongosh --quiet "$$MONGO_URI"
 
 markets-load: ## Full load of all markets (open, then closed) into Mongo
-	@$(ENV); go run ./cmd/load-markets
+	@lvl="$$LOG_LEVEL"; fmt="$$LOG_FORMAT"; $(ENV); \
+		LOG_LEVEL="$${lvl:-$$LOG_LEVEL}" LOG_FORMAT="$${fmt:-$$LOG_FORMAT}" go run ./cmd/load-markets
 
 markets-count: ## Count markets: total / open / closed / active
 	@$(ENV); $(MONGOSH) --eval 'printjson({total: db.markets.countDocuments(), closed: db.markets.countDocuments({closed: true}), active: db.markets.countDocuments({active: true}), last_sync: db.markets.find({}, {synced_at: 1}).sort({synced_at: -1}).limit(1).toArray()[0]?.synced_at})'

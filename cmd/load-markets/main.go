@@ -57,7 +57,7 @@ func run(log zerolog.Logger) error {
 		return err
 	}
 
-	client := polymarket.NewClient(polymarket.DefaultBaseURL)
+	client := polymarket.NewClient(polymarket.DefaultBaseURL, log)
 
 	// Open first, then closed: a market that closes between the two passes
 	// is overwritten by the closed pass and ends up with closed=true.
