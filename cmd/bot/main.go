@@ -52,6 +52,11 @@ func main() {
 	}()
 	log.Println("Connected to MongoDB successfully")
 
+	if err := mongoDB.EnsureKeywords(dbCtx, analyzer.DefaultKeywords); err != nil {
+		log.Fatalf("Failed to prepare keywords collection: %v", err)
+	}
+	log.Println("Keywords collection is ready")
+
 	hybridAnalyzer := analyzer.NewHybridAnalyzer(jevAPIKey)
 
 	// 4. Setup Error Group for managing concurrent tasks

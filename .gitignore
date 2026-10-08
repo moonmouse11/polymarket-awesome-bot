@@ -23,6 +23,7 @@ go.work.sum
 .pi
 .claude
 .codex
+.vibe-wise
 
 # IDE / OS
 .idea/
