@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,11 +12,28 @@ import (
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/analyzer"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
+	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
 )
 
 func main() {
-	log.Println("Starting Polymarket Bot...")
+	log, err := logger.New(os.Getenv("LOG_LEVEL"), os.Getenv("LOG_FORMAT"), os.Stdout)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	// run returns instead of exiting, so its deferred cleanup (MongoDB close) always runs.
+	if err := run(log); err != nil {
+		log.Error().Err(err).Msg("Bot stopped with error")
+		os.Exit(1)
+	}
+	log.Info().Msg("Bot stopped gracefully")
+}
+
+func run(log zerolog.Logger) error {
+	log.Info().Msg("Starting Polymarket Bot")
 
 	// 1. Setup graceful shutdown context
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -36,28 +53,28 @@ func main() {
 	// 3. Initialize Database
 	dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer dbCancel()
-	
+
 	mongoDB, err := db.NewMongoDB(dbCtx, mongoURI, "polymarket")
 	if err != nil {
-		log.Fatalf("Failed to initialize MongoDB: %v", err)
+		return fmt.Errorf("initialize MongoDB: %w", err)
 	}
 	defer func() {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		if err := mongoDB.Close(shutdownCtx); err != nil {
-			log.Printf("Error closing MongoDB: %v", err)
+			log.Error().Err(err).Msg("Error closing MongoDB")
 		} else {
-			log.Println("MongoDB connection closed gracefully")
+			log.Info().Msg("MongoDB connection closed gracefully")
 		}
 	}()
-	log.Println("Connected to MongoDB successfully")
+	log.Info().Msg("Connected to MongoDB")
 
 	if err := mongoDB.EnsureKeywords(dbCtx, analyzer.DefaultKeywords); err != nil {
-		log.Fatalf("Failed to prepare keywords collection: %v", err)
+		return fmt.Errorf("prepare keywords collection: %w", err)
 	}
-	log.Println("Keywords collection is ready")
+	log.Info().Msg("Keywords collection is ready")
 
-	hybridAnalyzer := analyzer.NewHybridAnalyzer(jevAPIKey)
+	hybridAnalyzer := analyzer.NewHybridAnalyzer(jevAPIKey, log)
 
 	// 4. Setup Error Group for managing concurrent tasks
 	g, gCtx := errgroup.WithContext(ctx)
@@ -68,15 +85,15 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	
+
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%s", port),
 		Handler: mux,
 	}
 
 	g.Go(func() error {
-		log.Printf("Starting health check server on port %s", port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Info().Str("port", port).Msg("Starting health check server")
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("http server error: %w", err)
 		}
 		return nil
@@ -84,7 +101,7 @@ func main() {
 
 	g.Go(func() error {
 		<-gCtx.Done()
-		log.Println("Shutting down health check server...")
+		log.Info().Msg("Shutting down health check server")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
@@ -102,57 +119,59 @@ func main() {
 			// Check if we need to shut down before processing the next event
 			select {
 			case <-gCtx.Done():
-				log.Println("Worker received shutdown signal, stopping event processing...")
+				log.Info().Msg("Worker received shutdown signal, stopping event processing")
 				return nil
 			default:
 			}
+
+			eventLog := log.With().Str("market_id", event.ID).Logger()
 
 			analyzeCtx, cancelAnalyze := context.WithTimeout(gCtx, 5*time.Second)
 			res, err := hybridAnalyzer.Analyze(analyzeCtx, event)
 			cancelAnalyze()
 
 			if err != nil {
-				log.Printf("Error analyzing event %s: %v", event.ID, err)
+				eventLog.Error().Err(err).Msg("Error analyzing event")
 				continue
 			}
 
 			if res.IsStrange {
-				log.Printf("FOUND STRANGE MARKET: %s (Reason: %s, Analyzer: %s)", event.Title, res.Reason, res.AnalyzedBy)
-				
+				eventLog.Info().
+					Str("title", event.Title).
+					Str("reason", res.Reason).
+					Str("analyzer", res.AnalyzedBy).
+					Msg("Found strange market")
+
 				saveCtx, cancelSave := context.WithTimeout(gCtx, 5*time.Second)
 				err = mongoDB.SaveMarketEvent(saveCtx, map[string]interface{}{
-					"event":      event,
-					"analysis":   res,
-					"timestamp":  time.Now(),
+					"event":     event,
+					"analysis":  res,
+					"timestamp": time.Now(),
 				})
 				cancelSave()
 
 				if err != nil {
-					log.Printf("Failed to save to MongoDB: %v", err)
+					eventLog.Error().Err(err).Msg("Failed to save to MongoDB")
 				} else {
-					log.Printf("Saved strange market %s to MongoDB", event.ID)
+					eventLog.Info().Msg("Saved strange market to MongoDB")
 				}
 			} else {
-				log.Printf("Market %s is normal.", event.Title)
+				eventLog.Info().Str("title", event.Title).Msg("Market is normal")
 			}
-			
+
 			// Sleep with context awareness
 			select {
 			case <-gCtx.Done():
-				log.Println("Worker interrupted during sleep...")
+				log.Info().Msg("Worker interrupted during sleep")
 				return nil
 			case <-time.After(2 * time.Second):
 			}
 		}
-		
-		log.Println("Worker finished processing all mock events.")
+
+		log.Info().Msg("Worker finished processing all mock events")
 		return nil
 	})
 
 	// 5. Wait for all tasks to finish or a fatal error to occur
-	if err := g.Wait(); err != nil {
-		log.Printf("Bot stopped with error: %v", err)
-	} else {
-		log.Println("Bot stopped gracefully.")
-	}
+	return g.Wait()
 }

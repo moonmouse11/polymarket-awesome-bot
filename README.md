@@ -44,6 +44,8 @@ make down              # остановить
 
 `make help` показывает все команды.
 
+Порты бота (`8080`) и MongoDB (`27017`) опубликованы только на `127.0.0.1` — из локальной сети к ним не подключиться. У MongoDB пока нет пароля; перед развёртыванием в кластере он обязателен.
+
 > ⚠️ `make clean` удаляет docker-volume с данными MongoDB. При следующем запуске ключевые слова будут засеяны заново из начального списка, все правки будут потеряны.
 
 ### Локальный запуск без Docker для бота
@@ -63,6 +65,18 @@ go run ./cmd/bot
 | `PORT` | `8080` | Порт health-check сервера |
 | `JEV_API_KEY` | — | Ключ AI-анализатора Jev; без него анализ идёт только по ключевым словам |
 | `TELEGRAM_BOT_TOKEN` | — | Зарезервировано под будущие уведомления, сейчас не используется |
+| `LOG_LEVEL` | `info` | Уровень логов: `debug`, `info`, `warn`, `error` |
+| `LOG_FORMAT` | `json` | `json` — для сбора логов в кластере, `console` — цветной читаемый вывод для локальной работы |
+
+## Логи
+
+Логи — основной способ видеть работу бота и его ошибки. Бот пишет их в stdout через [zerolog](https://github.com/rs/zerolog), каждая запись — набор полей (`level`, `time`, `message`, `market_id`, `analyzer`, `error`…):
+
+```json
+{"level":"warn","analyzer":"jev","market_id":"2","error":"Jev API key is missing (waiting for early access)","time":"2026-10-08T12:00:00+05:00","message":"analysis skipped or failed"}
+```
+
+Смотреть локально: `make logs`. Неверное значение `LOG_LEVEL` или `LOG_FORMAT` не даёт боту стартовать. При фатальной ошибке бот пишет её в лог и выходит с кодом 1.
 
 ## Данные (MongoDB)
 
@@ -92,7 +106,7 @@ docker compose exec mongodb mongosh polymarket --eval 'db.keywords.deleteOne({wo
 
 ## Тесты
 
-Тесты `internal/db` работают на настоящем MongoDB в отдельной базе `polymarket_test`. Она удаляется до и после тестов, рабочая база не затрагивается.
+Тесты `internal/logger` и `internal/analyzer` внешних зависимостей не требуют. Тесты `internal/db` работают на настоящем MongoDB в отдельной базе `polymarket_test`. Она удаляется до и после тестов, рабочая база не затрагивается.
 
 ```bash
 docker compose up -d mongodb
@@ -107,6 +121,7 @@ go test ./...
 cmd/bot/              точка входа: конфигурация, MongoDB, health-check, worker
 internal/analyzer/    анализаторы: keyword, jev (заглушка), hybrid (keyword → jev)
 internal/db/          MongoDB: подключение, strange_markets, keywords
+internal/logger/      настройка zerolog из LOG_LEVEL / LOG_FORMAT
 ```
 
 ## Заметки о Polymarket Gamma API
