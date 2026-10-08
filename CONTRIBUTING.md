@@ -58,7 +58,7 @@ The linter version lives in one place, `.golangci-lint-version`. Both the Makefi
 
 - Keep a pull request focused on one change.
 - `make check` must pass. CI runs the same checks on every pull request: lint, tests with MongoDB, and a Docker image build.
-- Update the README (both `README.md` and `README.ru.md`) when behavior, commands or configuration change.
+- Update `README.md` when behavior, commands or configuration change.
 - Never commit secrets: `.env` is ignored by git, use `.env.example` for new variables.
 
 ## Dependencies and versions

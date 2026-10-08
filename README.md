@@ -4,8 +4,6 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/moonmouse11/polymarket-awesome-bot)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**English** | [Русский](README.ru.md)
-
 A bot that researches [Polymarket](https://polymarket.com) prediction markets: it finds *awesome* markets — unusual, strange, worth a closer look — and tracks how they change.
 
 > [!NOTE]
@@ -18,10 +16,6 @@ A bot that researches [Polymarket](https://polymarket.com) prediction markets: i
 - [Getting started](#getting-started)
 - [Configuration](#configuration)
 - [Usage](#usage)
-- [Data model](#data-model)
-- [Logging](#logging)
-- [Project layout](#project-layout)
-- [Polymarket Gamma API notes](#polymarket-gamma-api-notes)
 - [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
@@ -132,74 +126,6 @@ These commands read `MONGO_URI` from `.env` and run `mongosh` inside the `mongod
 set -a; . ./.env; set +a
 docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.markets.find({tags: "Politics", closed: false}).limit(5)'
 ```
-
-### Keywords
-
-On every start the bot creates a unique index on `word` and seeds the initial list (`analyzer.DefaultKeywords`) **only if the collection is empty**, so edits in the database survive restarts. Words are stored in lowercase.
-
-```bash
-set -a; . ./.env; set +a
-docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.keywords.find({}, {_id: 0, word: 1})'
-docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.keywords.insertOne({word: "pope", created_at: new Date()})'
-docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.keywords.deleteOne({word: "boxing"})'
-```
-
-## Data model
-
-Database `polymarket`:
-
-| Collection | Contents |
-|---|---|
-| `markets` | All Polymarket markets. `_id` is the Polymarket market id. Indexes: `updated_at`, `closed`, `tags` |
-| `keywords` | Words that make a market awesome: `{ word, created_at }`, unique index on `word` |
-| `awesome_markets` | Reserved for markets marked as awesome (empty for now) |
-
-Stored market fields are defined in [`internal/polymarket/market.go`](internal/polymarket/market.go). To add a field from the API, add it to `apiMarket`, `Market` and `toMarket`.
-
-## Logging
-
-Logs are written to stdout with [zerolog](https://github.com/rs/zerolog) as structured records:
-
-```json
-{"level":"info","closed":false,"pages":10,"markets":1000,"time":"2026-10-08T12:00:00Z","message":"Loading markets"}
-```
-
-Bot logs: `make logs`. Market load logs go straight to the terminal:
-
-| Level | What is logged |
-|---|---|
-| `error` | The load failed: which pass, pages and markets written so far, the cause |
-| `warn` | A failed request to Polymarket before a retry: `attempt`, `max_attempts`, `status` or `error`, `retry_in` |
-| `info` | Start and end of each pass, progress every 10 pages |
-| `debug` | Every page: `page`, `markets`, `took` |
-
-Verbose mode: `LOG_LEVEL=debug make markets-load`. Pagination cursors and `MONGO_URI` (it contains a password) are never logged.
-
-## Project layout
-
-```
-cmd/bot/              bot entry point: config, MongoDB, keywords, health check
-cmd/load-markets/     full market load (make markets-load)
-internal/polymarket/  Gamma API client: /markets/keyset, retries, Market model
-internal/db/          MongoDB: connection, markets, keywords, awesome_markets
-internal/analyzer/    analyzers: keyword, jev (stub), hybrid (keyword → jev)
-internal/logger/      zerolog setup from LOG_LEVEL / LOG_FORMAT
-docker/mongo-init/    MongoDB users created on first start
-```
-
-## Polymarket Gamma API notes
-
-Verified against `https://gamma-api.polymarket.com` (October 2026):
-
-- The API is public, no key needed.
-- About 4.16 million markets: ~266k open and ~3.89M closed.
-- Without `closed` only open markets are returned; `closed=true` returns only closed ones. Open and closed markets cannot be fetched in one request. This also applies to lookups by id.
-- `/markets` returns at most 100 markets per request, and `offset` stops working after a few thousand records. A full scan needs `/markets/keyset` with `after_cursor`.
-- `/markets?id=1&id=2&…` returns up to 100 markets by id; `/markets/{id}` returns a market in any status.
-- There is no `category` field. Tags come with `include_tag=true`.
-- `outcomes` and `outcomePrices` are JSON arrays encoded as strings: `"[\"0.007\", \"0.993\"]"`.
-- `closed` is the reliable closing flag. `endDate` is not: markets may close earlier or stay open after it.
-- `?locale=ru` (and other languages) translates `question`, `outcomes` and the event title, but not `description`. Coverage is partial.
 
 ## Contributing
 
