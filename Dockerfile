@@ -1,4 +1,5 @@
-FROM golang:alpine AS builder
+# Exact versions: rebuilds must produce the same image. Bump deliberately.
+FROM golang:1.27.2-alpine3.24 AS builder
 
 WORKDIR /app
 
@@ -9,7 +10,7 @@ COPY . .
 
 RUN go build -o polymarket-bot ./cmd/bot
 
-FROM alpine:latest
+FROM alpine:3.24.2
 
 # Run as an unprivileged user instead of root.
 RUN adduser -D -H -u 10001 app

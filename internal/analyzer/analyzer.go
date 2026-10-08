@@ -14,10 +14,10 @@ type MarketEvent struct {
 
 // AnalysisResult contains the decision whether the event is awesome (strange/unexpected)
 type AnalysisResult struct {
-	IsAwesome   bool
-	Reason      string
-	Confidence  float64
-	AnalyzedBy  string // "keyword", "jev", or "groq_fallback"
+	IsAwesome  bool
+	Reason     string
+	Confidence float64
+	AnalyzedBy string // "keyword", "jev", or "groq_fallback"
 }
 
 // Analyzer interface defines the contract for analyzing market events

@@ -15,7 +15,7 @@ type MongoDB struct {
 
 func NewMongoDB(ctx context.Context, uri, dbName string) (*MongoDB, error) {
 	clientOptions := options.Client().ApplyURI(uri)
-	
+
 	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to mongo: %w", err)

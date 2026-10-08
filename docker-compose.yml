@@ -15,7 +15,8 @@ services:
     restart: unless-stopped
 
   mongodb:
-    image: mongo:latest
+    # Exact version: a major upgrade needs featureCompatibilityVersion steps first.
+    image: mongo:9.0.2
     environment:
       # Root and the users below are created only on the first start with an empty volume.
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER:-root}

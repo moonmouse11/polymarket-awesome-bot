@@ -175,7 +175,8 @@ func (c *Client) getOnce(ctx context.Context, path string, query url.Values, dst
 		}
 		return &retryableError{err: err}
 	}
-	defer resp.Body.Close()
+	// Close errors after reading carry no information about the data.
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 		return &retryableError{status: resp.StatusCode}

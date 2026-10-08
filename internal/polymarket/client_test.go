@@ -38,9 +38,9 @@ func TestAllMarkets_FollowsCursorAndParses(t *testing.T) {
 		}
 		switch r.URL.Query().Get("after_cursor") {
 		case "":
-			w.Write([]byte(page1))
+			_, _ = w.Write([]byte(page1))
 		case "CUR2":
-			w.Write([]byte(page2))
+			_, _ = w.Write([]byte(page2))
 		default:
 			t.Errorf("unexpected cursor %q", r.URL.Query().Get("after_cursor"))
 		}
@@ -100,7 +100,7 @@ func TestMarketsPage_RetriesServerErrors(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		w.Write([]byte(page2))
+		_, _ = w.Write([]byte(page2))
 	}))
 	defer srv.Close()
 
@@ -147,7 +147,7 @@ func TestMarketsPage_DoesNotRetryClientErrors(t *testing.T) {
 
 func TestMarketsPage_BadOutcomePricesIsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"markets":[{"id":"9","outcomePrices":"[\"abc\"]"}],"next_cursor":""}`))
+		_, _ = w.Write([]byte(`{"markets":[{"id":"9","outcomePrices":"[\"abc\"]"}],"next_cursor":""}`))
 	}))
 	defer srv.Close()
 
@@ -163,7 +163,7 @@ func TestMarketsPage_LogsRetriesAsWarn(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		w.Write([]byte(page2))
+		_, _ = w.Write([]byte(page2))
 	}))
 	defer srv.Close()
 

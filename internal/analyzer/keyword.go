@@ -30,7 +30,7 @@ func NewKeywordAnalyzer(triggerWords []string) *KeywordAnalyzer {
 
 func (k *KeywordAnalyzer) Analyze(ctx context.Context, event MarketEvent) (*AnalysisResult, error) {
 	text := strings.ToLower(event.Title + " " + event.Description)
-	
+
 	for _, word := range k.TriggerWords {
 		if strings.Contains(text, word) {
 			return &AnalysisResult{
@@ -41,7 +41,7 @@ func (k *KeywordAnalyzer) Analyze(ctx context.Context, event MarketEvent) (*Anal
 			}, nil
 		}
 	}
-	
+
 	return &AnalysisResult{
 		IsAwesome:  false,
 		Reason:     "No trigger words found",
