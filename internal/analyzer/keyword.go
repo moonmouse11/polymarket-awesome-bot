@@ -18,9 +18,13 @@ type KeywordAnalyzer struct {
 	TriggerWords []string
 }
 
-func NewKeywordAnalyzer() *KeywordAnalyzer {
+func NewKeywordAnalyzer(triggerWords []string) *KeywordAnalyzer {
+	words := triggerWords
+	if len(words) == 0 {
+		words = DefaultKeywords
+	}
 	return &KeywordAnalyzer{
-		TriggerWords: DefaultKeywords,
+		TriggerWords: words,
 	}
 }
 

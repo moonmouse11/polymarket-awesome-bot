@@ -58,3 +58,22 @@ func (m *MongoDB) EnsureKeywords(ctx context.Context, defaults []string) error {
 	}
 	return nil
 }
+
+// ListKeywords returns all trigger words stored in the keywords collection.
+func (m *MongoDB) ListKeywords(ctx context.Context) ([]string, error) {
+	cur, err := m.db.Collection(keywordsCollection).Find(ctx, bson.D{})
+	if err != nil {
+		return nil, fmt.Errorf("find keywords: %w", err)
+	}
+
+	var docs []Keyword
+	if err := cur.All(ctx, &docs); err != nil {
+		return nil, fmt.Errorf("decode keywords: %w", err)
+	}
+
+	words := make([]string, 0, len(docs))
+	for _, d := range docs {
+		words = append(words, d.Word)
+	}
+	return words, nil
+}

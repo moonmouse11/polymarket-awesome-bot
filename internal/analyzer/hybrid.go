@@ -6,16 +6,20 @@ import (
 	"github.com/rs/zerolog"
 )
 
+type analyzeStep interface {
+	Analyze(ctx context.Context, event MarketEvent) (*AnalysisResult, error)
+}
+
 // HybridAnalyzer implements a fallback chain: Keyword -> Jev
 type HybridAnalyzer struct {
-	keywordAnalyzer *KeywordAnalyzer
-	jevAnalyzer     *JevAnalyzer
+	keywordAnalyzer analyzeStep
+	jevAnalyzer     analyzeStep
 	log             zerolog.Logger
 }
 
-func NewHybridAnalyzer(jevAPIKey string, log zerolog.Logger) *HybridAnalyzer {
+func NewHybridAnalyzer(jevAPIKey string, triggerWords []string, log zerolog.Logger) *HybridAnalyzer {
 	return &HybridAnalyzer{
-		keywordAnalyzer: NewKeywordAnalyzer(),
+		keywordAnalyzer: NewKeywordAnalyzer(triggerWords),
 		jevAnalyzer:     NewJevAnalyzer(jevAPIKey),
 		log:             log,
 	}
@@ -34,8 +38,10 @@ func (h *HybridAnalyzer) Analyze(ctx context.Context, event MarketEvent) (*Analy
 	// Step 2: Fallback to AI (Jev) if it's available
 	jevRes, err := h.jevAnalyzer.Analyze(ctx, event)
 	if err != nil {
-		// If Jev is not set up yet or failed, we just return the negative keyword result
 		h.log.Warn().Err(err).Str("analyzer", "jev").Str("market_id", event.ID).Msg("analysis skipped or failed")
+		if res == nil {
+			return nil, err
+		}
 		return res, nil
 	}
 

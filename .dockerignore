@@ -1,0 +1,11 @@
+# Allowlist: everything is excluded except what the Go build needs.
+# A new source directory must be added here, otherwise `docker build` fails
+# with "package ... is not in std" / "no required module provides package".
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+
+# Tests are not needed to build the binary.
+**/*_test.go

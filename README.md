@@ -146,6 +146,12 @@ internal/logger/      настройка zerolog из LOG_LEVEL / LOG_FORMAT
 docker/mongo-init/    создание пользователей MongoDB при первом запуске
 ```
 
+### Сборка образа
+
+`.dockerignore` — белый список: в Docker-сборку попадают только `go.mod`, `go.sum`, `cmd/` и `internal/` (без `*_test.go`). `.env`, `.git` и бинарники в образ не попадают. **Новую папку с кодом нужно добавить в `.dockerignore`**, иначе `docker build` упадёт с ошибкой о ненайденном пакете.
+
+Бот в контейнере работает от непривилегированного пользователя (UID 10001), а не от root.
+
 ## Заметки о Polymarket Gamma API
 
 Проверено запросами к `https://gamma-api.polymarket.com`:

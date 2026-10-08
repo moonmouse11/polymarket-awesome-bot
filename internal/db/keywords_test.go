@@ -106,6 +106,24 @@ func TestEnsureKeywords_DoesNotReseedOnRestart(t *testing.T) {
 	}
 }
 
+func TestListKeywords_ReturnsStoredWords(t *testing.T) {
+	m := newTestMongo(t)
+
+	if err := m.EnsureKeywords(context.Background(), []string{"alien", "ufo"}); err != nil {
+		t.Fatalf("EnsureKeywords: %v", err)
+	}
+
+	got, err := m.ListKeywords(context.Background())
+	if err != nil {
+		t.Fatalf("ListKeywords: %v", err)
+	}
+	sort.Strings(got)
+	want := []string{"alien", "ufo"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("ListKeywords = %v, want %v", got, want)
+	}
+}
+
 func TestEnsureKeywords_RejectsDuplicateWords(t *testing.T) {
 	m := newTestMongo(t)
 	ctx := context.Background()

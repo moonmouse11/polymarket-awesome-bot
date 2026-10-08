@@ -74,7 +74,13 @@ func run(log zerolog.Logger) error {
 	}
 	log.Info().Msg("Keywords collection is ready")
 
-	hybridAnalyzer := analyzer.NewHybridAnalyzer(jevAPIKey, log)
+	keywordWords, err := mongoDB.ListKeywords(dbCtx)
+	if err != nil {
+		return fmt.Errorf("load keywords: %w", err)
+	}
+	log.Info().Int("count", len(keywordWords)).Msg("Loaded keywords from MongoDB")
+
+	hybridAnalyzer := analyzer.NewHybridAnalyzer(jevAPIKey, keywordWords, log)
 
 	// 4. Setup Error Group for managing concurrent tasks
 	g, gCtx := errgroup.WithContext(ctx)
@@ -87,8 +93,12 @@ func run(log zerolog.Logger) error {
 	})
 
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%s", port),
-		Handler: mux,
+		Addr:              fmt.Sprintf(":%s", port),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	g.Go(func() error {
