@@ -9,6 +9,7 @@ import (
 	"html"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/rs/zerolog"
 
@@ -148,22 +149,55 @@ func Format(mk db.AwesomeMarket) string {
 		sections = append(sections, strings.Join(stats, "\n"))
 	}
 
-	sections = append(sections, rule(mk))
+	sections = append(sections, reason(mk))
+	if tags := hashtags(mk.Tags); tags != "" {
+		sections = append(sections, tags)
+	}
 	sections = append(sections, fmt.Sprintf(`<a href="%s">Open on Polymarket</a>`, html.EscapeString(marketURL(mk))))
 	return strings.Join(sections, "\n\n")
 }
 
-// rule explains which rule made the market awesome.
-func rule(mk db.AwesomeMarket) string {
-	tags := "Tags: none"
-	if len(mk.Tags) > 0 {
-		tags = "Tags: " + html.EscapeString(strings.Join(mk.Tags, ", "))
-	}
+// reason says why the market passed. The rule is negative (awesome unless
+// filtered out), so for most markets the honest answer is "not filtered".
+func reason(mk db.AwesomeMarket) string {
 	if mk.Reason == db.ReasonWords && len(mk.Words) > 0 {
-		return fmt.Sprintf("Rule: keyword %s overrides excluded tag «%s»\n%s",
-			quoteAll(mk.Words), html.EscapeString(mk.ExcludedBy), tags)
+		return fmt.Sprintf("🔑 Passed: keyword %s\n(overrides excluded tag «%s»)",
+			quoteAll(mk.Words), html.EscapeString(mk.ExcludedBy))
 	}
-	return "Rule: no excluded tags\n" + tags
+	r := "✅ Passed: not filtered\n(none of the excluded tags)"
+	if len(mk.Words) > 0 {
+		r += "\nKeywords found: " + quoteAll(mk.Words)
+	}
+	return r
+}
+
+// hashtags turns tags into Telegram hashtags ("Middle East" → #MiddleEast),
+// which are clickable and searchable in the channel. A hashtag keeps only
+// letters, digits and "_"; one without a letter is not a hashtag in
+// Telegram and is dropped.
+func hashtags(tags []string) string {
+	seen := map[string]bool{}
+	var out []string
+	for _, tag := range tags {
+		var b strings.Builder
+		hasLetter := false
+		for _, r := range tag {
+			switch {
+			case unicode.IsLetter(r):
+				hasLetter = true
+				b.WriteRune(r)
+			case unicode.IsDigit(r) || r == '_':
+				b.WriteRune(r)
+			}
+		}
+		h := b.String()
+		if !hasLetter || seen[strings.ToLower(h)] {
+			continue
+		}
+		seen[strings.ToLower(h)] = true
+		out = append(out, "#"+h)
+	}
+	return strings.Join(out, " ")
 }
 
 func quoteAll(words []string) string {

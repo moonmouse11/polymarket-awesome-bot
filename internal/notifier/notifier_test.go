@@ -106,26 +106,37 @@ func TestFormat(t *testing.T) {
 		OutcomePrices: []float64{0.12, 0.88},
 		Volume:        48_200,
 		EndDate:       &end,
-		Tags:          []string{"Sports", "Space"},
+		Tags:          []string{"Sports", "Middle East"},
 	}
 	head := "🛸 <b>Will &lt;aliens&gt; &amp; UFOs land?</b>\n\n" +
 		"Yes 12% · No 88%\nVolume $48k · Ends Oct 31, 2026\n\n"
-	link := "\n\n<a href=\"https://polymarket.com/event/aliens-land/aliens-land-2027\">Open on Polymarket</a>"
+	tail := "\n\n#Sports #MiddleEast" +
+		"\n\n<a href=\"https://polymarket.com/event/aliens-land/aliens-land-2027\">Open on Polymarket</a>"
 
 	tests := []struct {
 		name string
 		mk   db.AwesomeMarket
 		want string
 	}{
-		{"words", db.AwesomeMarket{Market: base, Reason: db.ReasonWords, Words: []string{"alien", "ufo"}, ExcludedBy: "Sports"},
-			head + "Rule: keyword «alien», «ufo» overrides excluded tag «Sports»\nTags: Sports, Space" + link},
-		{"tags", db.AwesomeMarket{Market: base, Reason: db.ReasonTags},
-			head + "Rule: no excluded tags\nTags: Sports, Space" + link},
+		{"keyword overrides", db.AwesomeMarket{Market: base, Reason: db.ReasonWords, Words: []string{"alien", "ufo"}, ExcludedBy: "Sports"},
+			head + "🔑 Passed: keyword «alien», «ufo»\n(overrides excluded tag «Sports»)" + tail},
+		{"not filtered", db.AwesomeMarket{Market: base, Reason: db.ReasonTags},
+			head + "✅ Passed: not filtered\n(none of the excluded tags)" + tail},
+		{"not filtered with words", db.AwesomeMarket{Market: base, Reason: db.ReasonTags, Words: []string{"ufo"}},
+			head + "✅ Passed: not filtered\n(none of the excluded tags)\nKeywords found: «ufo»" + tail},
 	}
 	for _, tt := range tests {
 		if got := Format(tt.mk); got != tt.want {
 			t.Errorf("%s: Format =\n%s\nwant\n%s", tt.name, got, tt.want)
 		}
+	}
+}
+
+func TestHashtags(t *testing.T) {
+	got := hashtags([]string{"Iran Regime Rfr", "U.S. Politics", "AI & Tech", "2028", "Elon-Musk", "iran regime rfr", "Санкции"})
+	want := "#IranRegimeRfr #USPolitics #AITech #ElonMusk #Санкции"
+	if got != want {
+		t.Errorf("hashtags = %q, want %q", got, want)
 	}
 }
 

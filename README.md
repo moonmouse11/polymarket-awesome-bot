@@ -46,7 +46,7 @@ New awesome markets are posted to the Telegram channel **[Polymarket Search](htt
 1. **Initial load.** All markets — open first, then closed — are fetched page by page from the Gamma API and stored in MongoDB. Runs manually: `make markets-load`.
 2. **Updates.** Every `POLL_INTERVAL` (5 minutes by default) the bot fetches markets updated since the last run (newest `updatedAt` first, open and closed), writes them and recomputes their awesome flag. Progress is kept in the `sync_state` collection, so after downtime the bot catches up from where it stopped.
 3. **Awesome markets.** A market is awesome unless it has one of the tags in the `excluded_tags` collection (sports, auto-generated series, elections, macro…). The rule is deliberately broad for now; `make markets-awesome` recomputes the flag for all markets.
-4. **Notifications.** When an open market becomes awesome (a new market, or an old one after a `keywords` / `excluded_tags` edit), it is queued in MongoDB (`notify_pending`) and posted to the Telegram channel, at most ~20 messages a minute. A message shows the odds, volume, end date, the rule that made the market awesome (no excluded tags, or which keyword overrides which excluded tag) and a link to the market. Each market is announced once (`notified_at`); the message id is stored (`telegram_message_id`) so the message can be updated later; markets that closed or stopped being awesome before sending are dropped. Markets that were awesome before notifications existed are not announced.
+4. **Notifications.** When an open market becomes awesome (a new market, or an old one after a `keywords` / `excluded_tags` edit), it is queued in MongoDB (`notify_pending`) and posted to the Telegram channel, at most ~20 messages a minute. A message shows the odds, volume, end date, why the market passed (✅ not filtered — none of the excluded tags, or 🔑 a keyword that overrides an excluded tag), its tags as hashtags and a link to the market. Each market is announced once (`notified_at`); the message id is stored (`telegram_message_id`) so the message can be updated later; markets that closed or stopped being awesome before sending are dropped. Markets that were awesome before notifications existed are not announced.
 5. **Detectors** *(planned).* Only for awesome markets that are still open: sharp price jumps, edits of the question or description, closing and resolution, volume spikes.
 
 ## Getting started
@@ -137,6 +137,8 @@ make markets-awesome    # recompute is_awesome for all markets (a few minutes)
 make awesome-count      # awesome / open awesome, and which tags excluded the rest
 make awesome-sample     # 10 random open awesome markets
 make sync-state         # polling progress: watermark and last successful cycle
+make notify-queue       # markets waiting for a Telegram notification, last sent
+make notify-backfill    # queue all open awesome markets never announced (slow, ~20/min)
 make excluded-tags      # current excluded tags
 ```
 
