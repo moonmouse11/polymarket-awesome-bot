@@ -25,6 +25,7 @@ func (m *MongoDB) EnsureMarketIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "updated_at", Value: -1}}},
 		{Keys: bson.D{{Key: "closed", Value: 1}}},
 		{Keys: bson.D{{Key: "tags", Value: 1}}},
+		{Keys: bson.D{{Key: fieldIsAwesome, Value: 1}, {Key: "closed", Value: 1}}},
 	})
 	if err != nil {
 		return fmt.Errorf("create markets indexes: %w", err)
@@ -32,8 +33,9 @@ func (m *MongoDB) EnsureMarketIndexes(ctx context.Context) error {
 	return nil
 }
 
-// UpsertMarkets writes markets by _id: replaces stored documents and inserts
-// new ones, so reloading never creates duplicates.
+// UpsertMarkets writes markets by _id: updates stored documents and inserts
+// new ones, so reloading never creates duplicates. Only the API fields are
+// $set, so fields written elsewhere (is_awesome, ...) survive a reload.
 //
 // A closed market is never overwritten by an open copy: closing is final on
 // Polymarket, and an open copy can only be stale (fetched before it closed,
@@ -53,9 +55,13 @@ func (m *MongoDB) UpsertMarkets(ctx context.Context, markets []polymarket.Market
 			// the same _id and gets a duplicate key error: that is the skip.
 			filter = append(filter, bson.E{Key: "closed", Value: bson.D{{Key: "$ne", Value: true}}})
 		}
-		models = append(models, mongo.NewReplaceOneModel().
+		fields, err := setFields(mk)
+		if err != nil {
+			return 0, err
+		}
+		models = append(models, mongo.NewUpdateOneModel().
 			SetFilter(filter).
-			SetReplacement(mk).
+			SetUpdate(bson.D{{Key: "$set", Value: fields}}).
 			SetUpsert(true))
 	}
 
@@ -67,6 +73,26 @@ func (m *MongoDB) UpsertMarkets(ctx context.Context, markets []polymarket.Market
 		return 0, fmt.Errorf("upsert markets: %w", err)
 	}
 	return 0, nil
+}
+
+// setFields converts a market to the fields of a $set update. _id is left out:
+// it comes from the filter and cannot be changed.
+func setFields(mk polymarket.Market) (bson.D, error) {
+	raw, err := bson.Marshal(mk)
+	if err != nil {
+		return nil, fmt.Errorf("marshal market %s: %w", mk.ID, err)
+	}
+	var doc bson.D
+	if err := bson.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("unmarshal market %s: %w", mk.ID, err)
+	}
+	fields := doc[:0]
+	for _, e := range doc {
+		if e.Key != "_id" {
+			fields = append(fields, e)
+		}
+	}
+	return fields, nil
 }
 
 // onlyDuplicateKeys reports whether err is a bulk write error made only of

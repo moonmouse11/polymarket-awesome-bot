@@ -1,4 +1,4 @@
-.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show lint fmt test check
+.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample excluded-tags lint fmt test check
 
 .DEFAULT_GOAL := help
 
@@ -42,6 +42,19 @@ markets-find: ## Find markets by question text: make markets-find Q=alien
 markets-show: ## Show one full market document: make markets-show ID=559651
 	@test -n "$(ID)" || (echo "usage: make markets-show ID=559651" && exit 1)
 	@$(ENV); docker compose exec -T -e ID='$(ID)' mongodb mongosh --quiet "$$MONGO_URI" --eval 'printjson(db.markets.findOne({_id: process.env.ID}))'
+
+markets-awesome: ## Recompute is_awesome for all markets from excluded_tags
+	@lvl="$$LOG_LEVEL"; fmt="$$LOG_FORMAT"; $(ENV); \
+		LOG_LEVEL="$${lvl:-$$LOG_LEVEL}" LOG_FORMAT="$${fmt:-$$LOG_FORMAT}" go run ./cmd/mark-awesome
+
+awesome-count: ## Awesome counts by reason, overriding words and excluded tags
+	@$(ENV); $(MONGOSH) --eval 'printjson({awesome: db.markets.countDocuments({is_awesome: true}), awesome_open: db.markets.countDocuments({is_awesome: true, closed: false}), not_checked: db.markets.countDocuments({is_awesome: {$$exists: false}}), by_reason: db.markets.aggregate([{$$group: {_id: "$$awesome_reason", n: {$$sum: 1}}}, {$$sort: {n: -1}}]).toArray(), override_words: db.markets.aggregate([{$$match: {awesome_reason: "words"}}, {$$unwind: "$$awesome_words"}, {$$group: {_id: "$$awesome_words", n: {$$sum: 1}}}, {$$sort: {n: -1}}]).toArray(), excluded_by: db.markets.aggregate([{$$match: {is_awesome: false}}, {$$group: {_id: "$$awesome_excluded_tag", n: {$$sum: 1}}}, {$$sort: {n: -1}}]).toArray()})'
+
+awesome-sample: ## Show 10 random open awesome markets
+	@$(ENV); $(MONGOSH) --eval 'db.markets.aggregate([{$$match: {is_awesome: true, closed: false}}, {$$sample: {size: 10}}, {$$project: {question: 1, tags: 1}}]).forEach(m => print(m._id + "  " + m.question + "  [" + (m.tags || []).join(", ") + "]"))'
+
+excluded-tags: ## List tags that make a market not awesome
+	@$(ENV); $(MONGOSH) --eval 'db.excluded_tags.find({}, {_id: 0, tag: 1}).sort({tag: 1}).forEach(t => print(t.tag))'
 
 # --- Code quality (golangci-lint runs in Docker, same image as CI) ---
 # Pinned version: the same command must give the same result locally and in CI.

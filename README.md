@@ -25,6 +25,7 @@ A bot that researches [Polymarket](https://polymarket.com) prediction markets: i
 | Feature | State |
 |---|---|
 | Full load of all markets (open and closed) into MongoDB | ✅ done, manual command `make markets-load` |
+| Awesome marking by tags (`make markets-awesome`) | ✅ draft rule: everything except excluded tags |
 | `keywords` collection with initial seed | ✅ done |
 | Health check (`/health`), graceful shutdown | ✅ done |
 | Keyword analyzer (`KeywordAnalyzer`) | 🚧 code and tests exist, not wired into the bot yet |
@@ -38,7 +39,7 @@ A bot that researches [Polymarket](https://polymarket.com) prediction markets: i
 
 1. **Initial load.** All markets — open first, then closed — are fetched page by page from the Gamma API and stored in MongoDB. Runs manually: `make markets-load`.
 2. **Updates** *(planned).* Once a minute the bot requests markets sorted by `updatedAt` and updates stored documents. The previous version of a document is the "before" state for comparison.
-3. **Awesome markets** *(planned).* A market is awesome when it matches a word from the `keywords` collection.
+3. **Awesome markets.** A market is awesome unless it has one of the tags in the `excluded_tags` collection (sports, auto-generated series, elections, macro…). The rule is deliberately broad for now; `make markets-awesome` recomputes the flag for all markets.
 4. **Detectors** *(planned).* Only for awesome markets that are still open: sharp price jumps, edits of the question or description, closing and resolution, volume spikes.
 
 ## Getting started
@@ -119,6 +120,23 @@ make markets-show ID=559651     # full market document
 ```
 
 The load runs on the host, not in Docker, and needs Go. It is safe to rerun: markets are keyed by their Polymarket id, so a reload overwrites documents instead of duplicating them. If a load is interrupted, the pages already written stay — just run it again. A full load takes about 1.8 GB of MongoDB disk space.
+
+### Awesome markets
+
+```bash
+make markets-awesome    # recompute is_awesome for all markets (a few minutes)
+make awesome-count      # awesome / open awesome, and which tags excluded the rest
+make awesome-sample     # 10 random open awesome markets
+make excluded-tags      # current excluded tags
+```
+
+Excluded tags live in the `excluded_tags` collection and are matched exactly as Polymarket spells them. Edit the list in the database, then run `make markets-awesome` again:
+
+```bash
+set -a; . ./.env; set +a
+docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.excluded_tags.insertOne({tag: "Mentions", created_at: new Date()})'
+docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.excluded_tags.deleteOne({tag: "Economy"})'
+```
 
 These commands read `MONGO_URI` from `.env` and run `mongosh` inside the `mongodb` container. Any query:
 

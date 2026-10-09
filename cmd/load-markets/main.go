@@ -34,11 +34,13 @@ func main() {
 	// Ctrl+C / SIGTERM stops the load; pages already written stay in the DB.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	err = run(ctx, log)
+	// Read before stop(): stop() cancels ctx itself.
+	interrupted := ctx.Err() != nil
 	stop()
 
 	switch {
 	case err == nil:
-	case ctx.Err() != nil:
+	case interrupted:
 		// Stopped on purpose: not a failure, the error is just "context canceled".
 		log.Info().Msg("Market load stopped by signal; written pages are kept, rerun to continue")
 		os.Exit(130) // 128 + SIGINT, the shell convention for an interrupted command
@@ -67,7 +69,8 @@ func run(ctx context.Context, log zerolog.Logger) error {
 		_ = mongoDB.Close(closeCtx)
 	}()
 
-	if err := mongoDB.EnsureMarketIndexes(dbCtx); err != nil {
+	// No timeout: building a new index on millions of markets takes minutes.
+	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {
 		return err
 	}
 
