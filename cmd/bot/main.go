@@ -13,6 +13,7 @@ import (
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/analyzer"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/notifier"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/updater"
 	"github.com/rs/zerolog"
@@ -93,6 +94,26 @@ func run(log zerolog.Logger) error {
 		return err
 	}
 
+	// Telegram is optional: without a token the bot only tracks markets.
+	var tg *notifier.Telegram
+	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
+		if tg, err = notifier.NewTelegram(token, os.Getenv("TELEGRAM_CHANNEL_ID")); err != nil {
+			return err
+		}
+		// A wrong token or channel stops the bot. Telegram being unreachable
+		// does not: markets keep updating, notifications wait in the queue.
+		switch err := tg.Check(ctx); {
+		case err == nil:
+			log.Info().Msg("Telegram channel is ready")
+		case notifier.IsConfigError(err):
+			return err
+		default:
+			log.Warn().Err(err).Msg("Telegram is unreachable; notifications will be sent when it is back")
+		}
+	} else {
+		log.Info().Msg("TELEGRAM_BOT_TOKEN is not set; notifications are off")
+	}
+
 	// 4. Setup Error Group for managing concurrent tasks
 	g, gCtx := errgroup.WithContext(ctx)
 
@@ -133,6 +154,14 @@ func run(log zerolog.Logger) error {
 	g.Go(func() error {
 		return upd.Run(gCtx)
 	})
+
+	// Task C: announce markets that became awesome
+	if tg != nil {
+		n := notifier.New(mongoDB, tg, log)
+		g.Go(func() error {
+			return n.Run(gCtx)
+		})
+	}
 
 	// 5. Wait for all tasks to finish or a fatal error to occur
 	return g.Wait()

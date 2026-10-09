@@ -3,14 +3,20 @@
 [![CI](https://github.com/moonmouse11/polymarket-awesome-bot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moonmouse11/polymarket-awesome-bot/actions/workflows/ci.yml)
 [![Go version](https://img.shields.io/github/go-mod/go-version/moonmouse11/polymarket-awesome-bot)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Telegram channel](https://img.shields.io/badge/Telegram-@polymarket__search__awesome-26A5E4?logo=telegram)](https://t.me/polymarket_search_awesome)
 
 A bot that researches [Polymarket](https://polymarket.com) prediction markets: it finds *awesome* markets — unusual, strange, worth a closer look — and tracks how they change.
 
+## Live service
+
+New awesome markets are posted to the Telegram channel **[Polymarket Search](https://t.me/polymarket_search_awesome)** ([@polymarket_search_awesome](https://t.me/polymarket_search_awesome)) by the bot [@polymarket_search_awesome_bot](https://t.me/polymarket_search_awesome_bot). Subscribe to the channel to get them; the bot itself only posts and does not answer messages.
+
 > [!NOTE]
-> The project is in early development. Right now it loads and stores markets; detection and notifications are planned. Notification channels are a separate future part, and Telegram will be only one of them.
+> The project is in early development. Right now it loads and stores markets, marks awesome ones and announces new awesome markets in a Telegram channel; change detectors are planned.
 
 ## Table of contents
 
+- [Live service](#live-service)
 - [Status](#status)
 - [How it works](#how-it-works)
 - [Getting started](#getting-started)
@@ -30,9 +36,9 @@ A bot that researches [Polymarket](https://polymarket.com) prediction markets: i
 | Health check (`/health`), graceful shutdown | ✅ done |
 | Keyword analyzer (`KeywordAnalyzer`) | 🚧 code and tests exist, not wired into the bot yet |
 | AI analyzer Jev | 🚧 stub, waiting for API early access |
-| Polling for updates every minute | ✅ done, runs inside the bot |
+| Polling for updates every `POLL_INTERVAL` | ✅ done, runs inside the bot |
 | Change detectors for awesome markets | 📋 planned |
-| Notifications (Telegram and other channels) | 📋 planned |
+| Telegram channel: new awesome markets | ✅ done |
 | Market translations (English / Russian) | 📋 planned |
 
 ## How it works
@@ -40,7 +46,8 @@ A bot that researches [Polymarket](https://polymarket.com) prediction markets: i
 1. **Initial load.** All markets — open first, then closed — are fetched page by page from the Gamma API and stored in MongoDB. Runs manually: `make markets-load`.
 2. **Updates.** Every `POLL_INTERVAL` (5 minutes by default) the bot fetches markets updated since the last run (newest `updatedAt` first, open and closed), writes them and recomputes their awesome flag. Progress is kept in the `sync_state` collection, so after downtime the bot catches up from where it stopped.
 3. **Awesome markets.** A market is awesome unless it has one of the tags in the `excluded_tags` collection (sports, auto-generated series, elections, macro…). The rule is deliberately broad for now; `make markets-awesome` recomputes the flag for all markets.
-4. **Detectors** *(planned).* Only for awesome markets that are still open: sharp price jumps, edits of the question or description, closing and resolution, volume spikes.
+4. **Notifications.** When an open market becomes awesome (a new market, or an old one after a `keywords` / `excluded_tags` edit), it is queued in MongoDB (`notify_pending`) and posted to the Telegram channel, at most ~20 messages a minute. A message shows the odds, volume, end date, the rule that made the market awesome (no excluded tags, or which keyword overrides which excluded tag) and a link to the market. Each market is announced once (`notified_at`); the message id is stored (`telegram_message_id`) so the message can be updated later; markets that closed or stopped being awesome before sending are dropped. Markets that were awesome before notifications existed are not announced.
+5. **Detectors** *(planned).* Only for awesome markets that are still open: sharp price jumps, edits of the question or description, closing and resolution, volume spikes.
 
 ## Getting started
 
@@ -104,9 +111,10 @@ The bot is configured with environment variables. Docker Compose takes them from
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `json` | `json` for log collection, `console` for readable local output |
 | `JEV_API_KEY` | — | Reserved for the Jev analyzer, not used yet |
-| `TELEGRAM_BOT_TOKEN` | — | Reserved for notifications, not used yet |
+| `TELEGRAM_BOT_TOKEN` | — | Bot token from @BotFather; empty turns notifications off |
+| `TELEGRAM_CHANNEL_ID` | — | Channel for notifications: `@name`, `name` or `-100…`; the bot must be a channel admin allowed to post |
 
-An invalid `LOG_LEVEL` or `LOG_FORMAT` stops the bot at startup.
+An invalid `LOG_LEVEL` or `LOG_FORMAT`, a wrong Telegram token or an unknown channel stops the bot at startup. If Telegram is merely unreachable, the bot starts anyway: markets keep updating and notifications wait in the queue.
 
 ## Usage
 

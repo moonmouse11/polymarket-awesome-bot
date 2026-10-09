@@ -5,6 +5,7 @@ services:
       - MONGO_URI=mongodb://${MONGO_APP_USER:-polymarket_app}:${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD in .env}@mongodb:27017/polymarket?authSource=polymarket
       - JEV_API_KEY=${JEV_API_KEY:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID:-}
       - PORT=8080
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_FORMAT=${LOG_FORMAT:-json}

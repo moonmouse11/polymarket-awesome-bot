@@ -26,6 +26,11 @@ func (m *MongoDB) EnsureMarketIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "closed", Value: 1}}},
 		{Keys: bson.D{{Key: "tags", Value: 1}}},
 		{Keys: bson.D{{Key: fieldIsAwesome, Value: 1}, {Key: "closed", Value: 1}}},
+		// Notification queue: tiny, holds only pending markets.
+		{
+			Keys:    bson.D{{Key: fieldAwesomeSince, Value: 1}},
+			Options: options.Index().SetPartialFilterExpression(bson.D{{Key: fieldNotifyPending, Value: true}}),
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("create markets indexes: %w", err)

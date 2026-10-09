@@ -17,6 +17,10 @@ const (
 	fieldAwesomeWords     = "awesome_words"        // keywords found in the market; absent when none
 	fieldAwesomeExcludeBy = "awesome_excluded_tag" // first excluded tag found; absent when none
 	fieldAwesomeCheckedAt = "awesome_checked_at"
+	fieldAwesomeSince     = "awesome_since"       // when the market last became awesome; absent when not awesome
+	fieldNotifyPending    = "notify_pending"      // true: an open market became awesome and waits for a notification
+	fieldNotifiedAt       = "notified_at"         // when the notification was sent; never cleared, so no repeats
+	fieldMessageID        = "telegram_message_id" // channel message about the market, to edit it later
 )
 
 // Values of awesome_reason.
@@ -90,6 +94,8 @@ func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, excluded, keyw
 
 	hasExcluded := bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$type", Value: "$" + fieldAwesomeExcludeBy}}, "missing"}}}
 	hasWords := bson.D{{Key: "$gt", Value: bson.A{bson.D{{Key: "$size", Value: "$" + fieldAwesomeWords}}, 0}}}
+	isAwesome := bson.D{{Key: "$ne", Value: bson.A{"$" + fieldAwesomeReason, ReasonExcludedTag}}}
+	wasAwesome := bson.D{{Key: "$eq", Value: bson.A{"$" + fieldIsAwesome, true}}}
 
 	pipeline := mongo.Pipeline{
 		{{Key: "$set", Value: bson.D{
@@ -110,8 +116,32 @@ func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, excluded, keyw
 			{Key: fieldAwesomeWords, Value: bson.D{{Key: "$cond", Value: bson.A{hasWords, "$" + fieldAwesomeWords, "$$REMOVE"}}}},
 			{Key: fieldAwesomeCheckedAt, Value: "$$NOW"},
 		}}},
+		// Expressions in one $set see the values from before it, so
+		// "$is_awesome" here is the previous flag: this is where a transition
+		// to awesome is detected.
 		{{Key: "$set", Value: bson.D{
-			{Key: fieldIsAwesome, Value: bson.D{{Key: "$ne", Value: bson.A{"$" + fieldAwesomeReason, ReasonExcludedTag}}}},
+			{Key: fieldIsAwesome, Value: isAwesome},
+			{Key: fieldAwesomeSince, Value: bson.D{{Key: "$cond", Value: bson.A{
+				isAwesome,
+				bson.D{{Key: "$cond", Value: bson.A{wasAwesome, "$" + fieldAwesomeSince, "$$NOW"}}},
+				"$$REMOVE",
+			}}}},
+			{Key: fieldNotifyPending, Value: bson.D{{Key: "$switch", Value: bson.D{
+				{Key: "branches", Value: bson.A{
+					// Not awesome any more or closed: drop from the queue.
+					bson.D{{Key: "case", Value: bson.D{{Key: "$or", Value: bson.A{
+						bson.D{{Key: "$not", Value: bson.A{isAwesome}}},
+						bson.D{{Key: "$eq", Value: bson.A{"$closed", true}}},
+					}}}}, {Key: "then", Value: "$$REMOVE"}},
+					// Just became awesome and was never announced: enqueue.
+					bson.D{{Key: "case", Value: bson.D{{Key: "$and", Value: bson.A{
+						bson.D{{Key: "$not", Value: bson.A{wasAwesome}}},
+						bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$type", Value: "$" + fieldNotifiedAt}}, "missing"}}},
+					}}}}, {Key: "then", Value: true}},
+				}},
+				// Otherwise keep the current state (a missing field stays missing).
+				{Key: "default", Value: "$" + fieldNotifyPending},
+			}}}},
 		}}},
 		{{Key: "$unset", Value: awesomeTextField}},
 	}

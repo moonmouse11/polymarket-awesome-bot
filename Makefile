@@ -1,4 +1,4 @@
-.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state excluded-tags lint fmt test check
+.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state excluded-tags lint fmt test check notify-queue
 
 .DEFAULT_GOAL := help
 
@@ -52,6 +52,9 @@ awesome-count: ## Awesome counts by reason, overriding words and excluded tags
 
 awesome-sample: ## Show 10 random open awesome markets
 	@$(ENV); $(MONGOSH) --eval 'db.markets.aggregate([{$$match: {is_awesome: true, closed: false}}, {$$sample: {size: 10}}, {$$project: {question: 1, tags: 1}}]).forEach(m => print(m._id + "  " + m.question + "  [" + (m.tags || []).join(", ") + "]"))'
+
+notify-queue: ## Markets waiting for a Telegram notification, and the last sent
+	@$(ENV); $(MONGOSH) --eval 'print("pending:", db.markets.countDocuments({notify_pending: true})); db.markets.find({notified_at: {$$exists: true}}, {question: 1, notified_at: 1}).sort({notified_at: -1}).limit(5).forEach(m => print(m.notified_at.toISOString() + "  " + m.question))'
 
 sync-state: ## Show polling progress (watermark, last successful cycle)
 	@$(ENV); $(MONGOSH) --eval 'printjson(db.sync_state.find().toArray())'
