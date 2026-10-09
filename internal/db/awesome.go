@@ -36,6 +36,18 @@ const awesomeTextField = "_awesome_text"
 // event_title or description overrides the excluded tag.
 // It returns how many markets were matched.
 func (m *MongoDB) MarkAwesome(ctx context.Context, excluded, keywords []string) (int64, error) {
+	return m.markAwesome(ctx, bson.D{}, excluded, keywords)
+}
+
+// MarkAwesomeIDs is MarkAwesome for the given market ids only.
+func (m *MongoDB) MarkAwesomeIDs(ctx context.Context, ids, excluded, keywords []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	return m.markAwesome(ctx, bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}, excluded, keywords)
+}
+
+func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, excluded, keywords []string) (int64, error) {
 	if excluded == nil {
 		excluded = []string{} // null would break $filter
 	}
@@ -104,7 +116,7 @@ func (m *MongoDB) MarkAwesome(ctx context.Context, excluded, keywords []string) 
 		{{Key: "$unset", Value: awesomeTextField}},
 	}
 
-	res, err := m.db.Collection(marketsCollection).UpdateMany(ctx, bson.D{}, pipeline)
+	res, err := m.db.Collection(marketsCollection).UpdateMany(ctx, filter, pipeline)
 	if err != nil {
 		return 0, fmt.Errorf("mark awesome markets: %w", err)
 	}

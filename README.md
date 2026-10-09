@@ -30,7 +30,7 @@ A bot that researches [Polymarket](https://polymarket.com) prediction markets: i
 | Health check (`/health`), graceful shutdown | ✅ done |
 | Keyword analyzer (`KeywordAnalyzer`) | 🚧 code and tests exist, not wired into the bot yet |
 | AI analyzer Jev | 🚧 stub, waiting for API early access |
-| Polling for updates every minute | 📋 planned |
+| Polling for updates every minute | ✅ done, runs inside the bot |
 | Change detectors for awesome markets | 📋 planned |
 | Notifications (Telegram and other channels) | 📋 planned |
 | Market translations (English / Russian) | 📋 planned |
@@ -38,7 +38,7 @@ A bot that researches [Polymarket](https://polymarket.com) prediction markets: i
 ## How it works
 
 1. **Initial load.** All markets — open first, then closed — are fetched page by page from the Gamma API and stored in MongoDB. Runs manually: `make markets-load`.
-2. **Updates** *(planned).* Once a minute the bot requests markets sorted by `updatedAt` and updates stored documents. The previous version of a document is the "before" state for comparison.
+2. **Updates.** Every `POLL_INTERVAL` (5 minutes by default) the bot fetches markets updated since the last run (newest `updatedAt` first, open and closed), writes them and recomputes their awesome flag. Progress is kept in the `sync_state` collection, so after downtime the bot catches up from where it stopped.
 3. **Awesome markets.** A market is awesome unless it has one of the tags in the `excluded_tags` collection (sports, auto-generated series, elections, macro…). The rule is deliberately broad for now; `make markets-awesome` recomputes the flag for all markets.
 4. **Detectors** *(planned).* Only for awesome markets that are still open: sharp price jumps, edits of the question or description, closing and resolution, volume spikes.
 
@@ -100,6 +100,7 @@ The bot is configured with environment variables. Docker Compose takes them from
 | `MONGO_TEST_USER` / `MONGO_TEST_PASSWORD` | `polymarket_test` / — | Test user (password required) |
 | `MONGO_TEST_URI` | — | Connection for `internal/db` tests |
 | `PORT` | `8080` | Health check server port |
+| `POLL_INTERVAL` | `5m` | How often the bot fetches updated markets (`90s`, `10m`, …) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `json` | `json` for log collection, `console` for readable local output |
 | `JEV_API_KEY` | — | Reserved for the Jev analyzer, not used yet |
@@ -127,6 +128,7 @@ The load runs on the host, not in Docker, and needs Go. It is safe to rerun: mar
 make markets-awesome    # recompute is_awesome for all markets (a few minutes)
 make awesome-count      # awesome / open awesome, and which tags excluded the rest
 make awesome-sample     # 10 random open awesome markets
+make sync-state         # polling progress: watermark and last successful cycle
 make excluded-tags      # current excluded tags
 ```
 

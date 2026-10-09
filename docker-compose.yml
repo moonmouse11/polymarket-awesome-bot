@@ -8,6 +8,7 @@ services:
       - PORT=8080
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      - POLL_INTERVAL=${POLL_INTERVAL:-5m}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

@@ -13,6 +13,8 @@ import (
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/analyzer"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/updater"
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
 )
@@ -43,6 +45,10 @@ func run(log zerolog.Logger) error {
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
 		mongoURI = "mongodb://localhost:27017"
+	}
+	pollInterval, err := updater.ParseInterval(os.Getenv("POLL_INTERVAL"))
+	if err != nil {
+		return err
 	}
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -79,6 +85,14 @@ func run(log zerolog.Logger) error {
 	}
 	log.Info().Int("count", len(keywordWords)).Msg("Loaded keywords from MongoDB")
 
+	if err := mongoDB.EnsureExcludedTags(dbCtx, analyzer.DefaultExcludedTags); err != nil {
+		return fmt.Errorf("prepare excluded tags collection: %w", err)
+	}
+	// No timeout: building a new index on millions of markets takes minutes.
+	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {
+		return err
+	}
+
 	// 4. Setup Error Group for managing concurrent tasks
 	g, gCtx := errgroup.WithContext(ctx)
 
@@ -112,6 +126,12 @@ func run(log zerolog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
+	})
+
+	// Task B: keep markets up to date (polls the API every POLL_INTERVAL)
+	upd := updater.New(polymarket.NewClient(polymarket.DefaultBaseURL, log), mongoDB, log, pollInterval)
+	g.Go(func() error {
+		return upd.Run(gCtx)
 	})
 
 	// 5. Wait for all tasks to finish or a fatal error to occur

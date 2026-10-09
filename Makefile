@@ -1,4 +1,4 @@
-.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample excluded-tags lint fmt test check
+.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state excluded-tags lint fmt test check
 
 .DEFAULT_GOAL := help
 
@@ -52,6 +52,9 @@ awesome-count: ## Awesome counts by reason, overriding words and excluded tags
 
 awesome-sample: ## Show 10 random open awesome markets
 	@$(ENV); $(MONGOSH) --eval 'db.markets.aggregate([{$$match: {is_awesome: true, closed: false}}, {$$sample: {size: 10}}, {$$project: {question: 1, tags: 1}}]).forEach(m => print(m._id + "  " + m.question + "  [" + (m.tags || []).join(", ") + "]"))'
+
+sync-state: ## Show polling progress (watermark, last successful cycle)
+	@$(ENV); $(MONGOSH) --eval 'printjson(db.sync_state.find().toArray())'
 
 excluded-tags: ## List tags that make a market not awesome
 	@$(ENV); $(MONGOSH) --eval 'db.excluded_tags.find({}, {_id: 0, tag: 1}).sort({tag: 1}).forEach(t => print(t.tag))'

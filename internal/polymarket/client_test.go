@@ -200,3 +200,29 @@ func TestMarketsPage_NetworkErrorHidesCursor(t *testing.T) {
 		t.Fatalf("cursor leaked into error: %v", err)
 	}
 }
+
+func TestRecentlyUpdated_SortsNewestFirstAndStops(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		q := r.URL.Query()
+		if q.Get("order") != "updatedAt" || q.Get("ascending") != "false" || q.Get("closed") != "false" {
+			t.Errorf("unexpected request %s", r.URL)
+		}
+		// Every page points to another one: only fn can stop the walk.
+		_, _ = w.Write([]byte(`{"markets":[{"id":"1","outcomes":"","outcomePrices":""}],"next_cursor":"MORE"}`))
+	}))
+	defer srv.Close()
+
+	pages := 0
+	err := newTestClient(srv).RecentlyUpdated(context.Background(), false, func(page []Market) (bool, error) {
+		pages++
+		return pages < 3, nil
+	})
+	if err != nil {
+		t.Fatalf("RecentlyUpdated: %v", err)
+	}
+	if pages != 3 || requests.Load() != 3 {
+		t.Fatalf("pages = %d, requests = %d, want 3 and 3", pages, requests.Load())
+	}
+}
