@@ -10,8 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-telegram/bot"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/admin"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/analyzer"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/health"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/notifier"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
@@ -94,11 +97,34 @@ func run(log zerolog.Logger) error {
 		return err
 	}
 
+	adminIDs, err := admin.ParseAdminIDs(os.Getenv("TELEGRAM_ADMIN_IDS"))
+	if err != nil {
+		return err
+	}
+	// The bot's own state (cycles, errors, 429s) for admin commands and alerts.
+	reg := health.NewRegistry()
+	commands := admin.New(adminIDs, mongoDB, reg, log)
+
 	// Telegram is optional: without a token the bot only tracks markets.
 	var tg *notifier.Telegram
 	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
-		if tg, err = notifier.NewTelegram(token, os.Getenv("TELEGRAM_CHANNEL_ID")); err != nil {
+		tgLog := log.With().Str("component", "telegram").Logger()
+		if tg, err = notifier.NewTelegram(token, os.Getenv("TELEGRAM_CHANNEL_ID"),
+			bot.WithDefaultHandler(commands.Handle),
+			bot.WithAllowedUpdates(bot.AllowedUpdates{"message"}),
+			// Errors of receiving messages (long polling), e.g. Telegram unreachable.
+			bot.WithErrorsHandler(func(err error) {
+				if ctx.Err() != nil {
+					return // shutting down
+				}
+				reg.Report(health.Telegram, err)
+				tgLog.Warn().Err(err).Msg("Receiving Telegram messages failed; retrying")
+			}),
+		); err != nil {
 			return err
+		}
+		if len(adminIDs) == 0 {
+			log.Info().Msg("TELEGRAM_ADMIN_IDS is not set; admin commands and alerts are off (send /start to the bot to see your id in the log)")
 		}
 		// A wrong token or channel stops the bot. Telegram being unreachable
 		// does not: markets keep updating, notifications wait in the queue.
@@ -150,16 +176,29 @@ func run(log zerolog.Logger) error {
 	})
 
 	// Task B: keep markets up to date (polls the API every POLL_INTERVAL)
-	upd := updater.New(polymarket.NewClient(polymarket.DefaultBaseURL, log), mongoDB, log, pollInterval)
+	upd := updater.New(polymarket.NewClient(polymarket.DefaultBaseURL, log), mongoDB, log, pollInterval).WithHealth(reg)
 	g.Go(func() error {
 		return upd.Run(gCtx)
 	})
 
-	// Task C: announce markets that became awesome
 	if tg != nil {
-		n := notifier.New(mongoDB, tg, log)
+		// Task C: announce markets that became awesome
+		n := notifier.New(mongoDB, tg, log).WithHealth(reg)
 		g.Go(func() error {
 			return n.Run(gCtx)
+		})
+
+		// Task D: health checks every minute, alerts to the admins
+		mon := health.NewMonitor(reg, mongoDB, tg, mongoDB, admin.NewAlerter(tg, adminIDs), log)
+		commands.WithAlerts(mon)
+		g.Go(func() error {
+			return mon.Run(gCtx)
+		})
+
+		// Task E: admin commands (long polling)
+		g.Go(func() error {
+			log.Info().Int("admins", len(adminIDs)).Msg("Listening for admin commands")
+			return tg.Listen(gCtx)
 		})
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/health"
 )
 
 const (
@@ -41,8 +42,20 @@ type Sender interface {
 	Edit(ctx context.Context, messageID int, html string) error
 }
 
+// Reporter receives the outcome of Telegram calls (implemented by *health.Registry).
+type Reporter interface {
+	Report(name string, err error)
+	RateLimited(retryAfter time.Duration)
+}
+
+type noReporter struct{}
+
+func (noReporter) Report(string, error)      {}
+func (noReporter) RateLimited(time.Duration) {}
+
 // Notifier sends queued markets one by one and edits posted messages.
 type Notifier struct {
+	health    Reporter
 	queue     Queue
 	sender    Sender
 	log       zerolog.Logger
@@ -58,6 +71,26 @@ func New(queue Queue, sender Sender, log zerolog.Logger) *Notifier {
 		log:       log.With().Str("component", "notifier").Logger(),
 		sendEvery: sendEvery,
 		idleWait:  idleWait,
+		health:    noReporter{},
+	}
+}
+
+// WithHealth makes the notifier report Telegram calls to r.
+func (n *Notifier) WithHealth(r Reporter) *Notifier {
+	n.health = r
+	return n
+}
+
+// observe reports a Telegram call: a 429 is a rate limit, a rejected message
+// (400) still means Telegram is reachable, anything else is a failure.
+func (n *Notifier) observe(err error) {
+	switch d := retryAfter(err); {
+	case d > 0:
+		n.health.RateLimited(d)
+	case err == nil || isBadMessage(err):
+		n.health.Report(health.Telegram, nil)
+	default:
+		n.health.Report(health.Telegram, err)
 	}
 }
 
@@ -119,6 +152,7 @@ func (n *Notifier) sendBatch(ctx context.Context) (int, error) {
 			return sent, err
 		}
 		msgID, err := n.sender.Send(ctx, Format(mk))
+		n.observe(err)
 		if err != nil {
 			if !isBadMessage(err) {
 				return sent, fmt.Errorf("send market %s: %w", mk.ID, err)
@@ -148,7 +182,9 @@ func (n *Notifier) editBatch(ctx context.Context) (int, error) {
 		if err := n.pace(ctx); err != nil {
 			return edited, err
 		}
-		if err := n.sender.Edit(ctx, mk.MessageID, Format(mk)); err != nil {
+		err := n.sender.Edit(ctx, mk.MessageID, Format(mk))
+		n.observe(err)
+		if err != nil {
 			if !isBadMessage(err) {
 				return edited, fmt.Errorf("edit message %d (market %s): %w", mk.MessageID, mk.ID, err)
 			}

@@ -102,7 +102,7 @@ func TestPass_BootstrapsFromDBAndStopsAtOverlap(t *testing.T) {
 		{{ID: "never", UpdatedAt: at(-time.Hour)}},
 	}}
 
-	if err := newTestUpdater(src, store).pass(context.Background(), false); err != nil {
+	if _, err := newTestUpdater(src, store).pass(context.Background(), false); err != nil {
 		t.Fatalf("pass: %v", err)
 	}
 
@@ -130,7 +130,7 @@ func TestPass_UsesStoredWatermark(t *testing.T) {
 	src := &fakeSource{pages: [][]polymarket.Market{
 		{{ID: "a", UpdatedAt: at(time.Minute)}, {ID: "b", UpdatedAt: at(-10 * time.Minute)}},
 	}}
-	if err := newTestUpdater(src, store).pass(context.Background(), true); err != nil {
+	if _, err := newTestUpdater(src, store).pass(context.Background(), true); err != nil {
 		t.Fatalf("pass: %v", err)
 	}
 	if len(store.upserted) != 1 || store.upserted[0] != "a" {
@@ -143,7 +143,7 @@ func TestPass_ErrorKeepsWatermark(t *testing.T) {
 	store.state["markets_open"] = db.SyncState{ID: "markets_open", Watermark: base}
 
 	src := &fakeSource{err: errors.New("API down")}
-	if err := newTestUpdater(src, store).pass(context.Background(), false); err == nil {
+	if _, err := newTestUpdater(src, store).pass(context.Background(), false); err == nil {
 		t.Fatal("pass succeeded, want error")
 	}
 	if st := store.state["markets_open"]; !st.Watermark.Equal(base) {
@@ -156,7 +156,7 @@ func TestPass_NoUpdatesKeepsWatermark(t *testing.T) {
 	store.state["markets_open"] = db.SyncState{ID: "markets_open", Watermark: base}
 
 	src := &fakeSource{pages: [][]polymarket.Market{{{ID: "old", UpdatedAt: at(-time.Hour)}}}}
-	if err := newTestUpdater(src, store).pass(context.Background(), false); err != nil {
+	if _, err := newTestUpdater(src, store).pass(context.Background(), false); err != nil {
 		t.Fatalf("pass: %v", err)
 	}
 	if st := store.state["markets_open"]; !st.Watermark.Equal(base) || st.LastMarkets != 0 {
@@ -242,5 +242,41 @@ func TestRun_WarnsWhenCycleIsSlowerThanInterval(t *testing.T) {
 				t.Errorf("warning logged = %v, want %v; logs:\n%s", gotWarn, tt.wantWarn, logs.String())
 			}
 		})
+	}
+}
+
+type fakeReporter struct {
+	markets []int
+	errs    []error
+	onCycle func()
+}
+
+func (f *fakeReporter) Cycle(markets int, _ time.Duration, _ bool, err error) {
+	f.markets = append(f.markets, markets)
+	f.errs = append(f.errs, err)
+	f.onCycle()
+}
+
+func TestRun_ReportsCycles(t *testing.T) {
+	store := newFakeStore()
+	store.maxUpdated = base
+	src := &fakeSource{pages: [][]polymarket.Market{{{ID: "a", UpdatedAt: at(time.Minute)}}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	rep := &fakeReporter{}
+	rep.onCycle = func() {
+		if len(rep.markets) == 1 {
+			src.err = errors.New("API down") // the next cycle fails
+			return
+		}
+		cancel()
+	}
+	u := New(src, store, zerolog.Nop(), time.Millisecond).WithHealth(rep)
+
+	if err := u.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// First cycle: market "a" from the open and the closed pass.
+	if len(rep.markets) != 2 || rep.markets[0] != 2 || rep.errs[0] != nil || rep.errs[1] == nil {
+		t.Errorf("reported markets %v, errors %v; want [2 0] and an error in the second cycle", rep.markets, rep.errs)
 	}
 }

@@ -37,6 +37,7 @@ New awesome markets are posted to the Telegram channel **[Polymarket Search](htt
 | Keyword analyzer (`KeywordAnalyzer`) | 🚧 code and tests exist, not wired into the bot yet |
 | AI analyzer Jev | 🚧 stub, waiting for API early access |
 | Polling for updates every `POLL_INTERVAL` | ✅ done, runs inside the bot |
+| Admin commands `/status`, `/health_check` and health alerts in Telegram | ✅ done |
 | Change detectors for awesome markets | 📋 planned |
 | Telegram channel: new awesome markets | ✅ done |
 | Market translations (English / Russian) | 📋 planned |
@@ -47,7 +48,8 @@ New awesome markets are posted to the Telegram channel **[Polymarket Search](htt
 2. **Updates.** Every `POLL_INTERVAL` (5 minutes by default) the bot fetches markets updated since the last run (newest `updatedAt` first, open and closed), writes them and recomputes their awesome flag. Progress is kept in the `sync_state` collection, so after downtime the bot catches up from where it stopped.
 3. **Awesome markets.** A market is awesome unless it has one of the tags in the `excluded_tags` collection (sports, auto-generated series, elections, macro…). The rule is deliberately broad for now; `make markets-awesome` recomputes the flag for all markets.
 4. **Notifications.** When an open market becomes awesome (a new market, or an old one after a `keywords` / `excluded_tags` edit), it is queued in MongoDB (`notify_pending`) and posted to the Telegram channel, at most ~20 messages a minute. A message shows the odds, volume, end date, why the market passed (✅ not filtered — none of the excluded tags, or 🔑 a keyword that overrides an excluded tag), its tags as hashtags and a link to the market. Each market is announced once (`notified_at`); the message id is stored (`telegram_message_id`), so posted messages can be re-rendered from current data and edited silently (`edit_pending`, `make notify-reformat`); new markets are sent before edits; markets that closed or stopped being awesome before sending are dropped. Markets that were awesome before notifications existed are not announced.
-5. **Detectors** *(planned).* Only for awesome markets that are still open: sharp price jumps, edits of the question or description, closing and resolution, volume spikes.
+5. **Admin and alerts.** Admins (`TELEGRAM_ADMIN_IDS`) can ask the bot in a private chat for `/status` and `/health_check`. Every minute the bot checks MongoDB and Telegram and evaluates alert rules; an admin gets one message when a problem starts (repeated every 6 h while it lasts) and one when it is resolved. Health data is kept in memory and counted since the bot started.
+6. **Detectors** *(planned).* Only for awesome markets that are still open: sharp price jumps, edits of the question or description, closing and resolution, volume spikes.
 
 ## Getting started
 
@@ -113,6 +115,7 @@ The bot is configured with environment variables. Docker Compose takes them from
 | `JEV_API_KEY` | — | Reserved for the Jev analyzer, not used yet |
 | `TELEGRAM_BOT_TOKEN` | — | Bot token from @BotFather; empty turns notifications off |
 | `TELEGRAM_CHANNEL_ID` | — | Channel for notifications: `@name`, `name` or `-100…`; the bot must be a channel admin allowed to post |
+| `TELEGRAM_ADMIN_IDS` | — | Telegram user ids (comma-separated) allowed to use admin commands and receiving alerts; empty turns them off |
 
 An invalid `LOG_LEVEL` or `LOG_FORMAT`, a wrong Telegram token or an unknown channel stops the bot at startup. If Telegram is merely unreachable, the bot starts anyway: markets keep updating and notifications wait in the queue.
 
@@ -158,6 +161,29 @@ These commands read `MONGO_URI` from `.env` and run `mongosh` inside the `mongod
 set -a; . ./.env; set +a
 docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.markets.find({tags: "Politics", closed: false}).limit(5)'
 ```
+
+### Admin commands and alerts
+
+1. Send `/start` to the bot in a private chat. The bot does not answer strangers, but logs their id: `make logs` → `Telegram /start from a non-admin … user_id=…`.
+2. Put the id into `TELEGRAM_ADMIN_IDS` in `.env` and restart the bot (`make up`).
+
+| Command | Shows |
+|---|---|
+| `/status` | Queues (to send, to edit); awesome markets (total, open); last 24 h: markets updated, new markets, became awesome, announced, updates from the API; last update cycle |
+| `/health_check` | Uptime; MongoDB (live ping); updater and Telegram: last success, failures, last error; Telegram 429s; active alerts |
+
+Alerts (🔴 when a problem starts, 🟢 when it is resolved):
+
+| Problem | 🔴 when | 🟢 when |
+|---|---|---|
+| Market updates are failing | 3 cycles in a row failed | a cycle succeeds |
+| Market updates are lagging | 3 cycles in a row took longer than `POLL_INTERVAL` | a cycle fits the interval |
+| MongoDB is unreachable | 2 pings in a row failed (one a minute) | a ping succeeds |
+| Telegram rate limit | a 429 with a penalty over 5 min | the penalty is over |
+| Notification queue is growing | more than 500 markets wait | fewer than 100 |
+| Telegram was unreachable | — (an alert cannot be delivered) | Telegram answers again: one message with the outage period |
+
+Only one bot instance may receive messages at a time: running a second copy with the same token (e.g. `go run ./cmd/bot` next to Docker) makes Telegram answer `409 Conflict`.
 
 ## Contributing
 

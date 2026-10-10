@@ -42,6 +42,15 @@ type Store interface {
 	MarkAwesomeIDs(ctx context.Context, ids, excluded, keywords []string) (int64, error)
 }
 
+// Reporter receives the result of every cycle (implemented by *health.Registry).
+type Reporter interface {
+	Cycle(markets int, took time.Duration, slow bool, err error)
+}
+
+type noReporter struct{}
+
+func (noReporter) Cycle(int, time.Duration, bool, error) {}
+
 // Updater polls the API for updated markets.
 type Updater struct {
 	src      Source
@@ -50,6 +59,7 @@ type Updater struct {
 	interval time.Duration
 	overlap  time.Duration
 	now      func() time.Time
+	health   Reporter
 }
 
 // ParseInterval reads POLL_INTERVAL ("5m", "90s", ...); empty means DefaultInterval.
@@ -75,7 +85,14 @@ func New(src Source, store Store, log zerolog.Logger, interval time.Duration) *U
 		interval: interval,
 		overlap:  defaultOverlap,
 		now:      time.Now,
+		health:   noReporter{},
 	}
+}
+
+// WithHealth makes the updater report every cycle to r.
+func (u *Updater) WithHealth(r Reporter) *Updater {
+	u.health = r
+	return u
 }
 
 // Run polls until ctx is cancelled. A failed cycle is logged and retried on
@@ -86,10 +103,13 @@ func (u *Updater) Run(ctx context.Context) error {
 	u.log.Info().Dur("interval", u.interval).Msg("Market updater started")
 	for {
 		started := u.now()
-		u.cycle(ctx)
+		markets, err := u.cycle(ctx)
 
 		took := u.now().Sub(started)
 		wait := u.interval - took
+		if ctx.Err() == nil {
+			u.health.Cycle(markets, took, wait < 0, err)
+		}
 		if wait < 0 {
 			wait = 0
 			// Updates arrive faster than we process them: data lags more and
@@ -111,15 +131,24 @@ func (u *Updater) Run(ctx context.Context) error {
 }
 
 // cycle updates open markets, then closed ones (closing shows up there).
-func (u *Updater) cycle(ctx context.Context) {
+// It returns how many markets were written and the first error.
+func (u *Updater) cycle(ctx context.Context) (int, error) {
+	total := 0
+	var first error
 	for _, closed := range []bool{false, true} {
-		if err := u.pass(ctx, closed); err != nil {
+		n, err := u.pass(ctx, closed)
+		total += n
+		if err != nil {
 			if ctx.Err() != nil {
-				return // shutting down, not a failure
+				return total, nil // shutting down, not a failure
 			}
 			u.log.Error().Err(err).Bool("closed", closed).Msg("Market update failed; will retry next cycle")
+			if first == nil {
+				first = err
+			}
 		}
 	}
+	return total, first
 }
 
 func stateID(closed bool) string {
@@ -132,22 +161,22 @@ func stateID(closed bool) string {
 // pass fetches markets updated since the watermark, writes them, recomputes
 // their awesome flag and moves the watermark. On error nothing is advanced,
 // so the next cycle repeats the same range.
-func (u *Updater) pass(ctx context.Context, closed bool) error {
+func (u *Updater) pass(ctx context.Context, closed bool) (int, error) {
 	started := u.now()
 	watermark, err := u.watermark(ctx, closed)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	stopBefore := watermark.Add(-u.overlap)
 
 	// Read once per pass: edits in the DB apply from the next cycle.
 	excluded, err := u.store.ListExcludedTags(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	keywords, err := u.store.ListKeywords(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	newest := watermark
@@ -183,7 +212,7 @@ func (u *Updater) pass(ctx context.Context, closed bool) error {
 		return more, nil
 	})
 	if err != nil {
-		return fmt.Errorf("fetch updated markets: %w", err)
+		return total, fmt.Errorf("fetch updated markets: %w", err)
 	}
 
 	if err := u.store.SaveSyncState(ctx, db.SyncState{
@@ -192,7 +221,7 @@ func (u *Updater) pass(ctx context.Context, closed bool) error {
 		LastSuccessAt: u.now(),
 		LastMarkets:   total,
 	}); err != nil {
-		return err
+		return total, err
 	}
 
 	ev := u.log.Debug()
@@ -205,7 +234,7 @@ func (u *Updater) pass(ctx context.Context, closed bool) error {
 		Time("watermark", newest).
 		Dur("took", u.now().Sub(started).Round(time.Millisecond)).
 		Msg("Markets updated")
-	return nil
+	return total, nil
 }
 
 // watermark returns the stored watermark or, on the very first run, the

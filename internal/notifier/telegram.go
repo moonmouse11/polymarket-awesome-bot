@@ -100,6 +100,32 @@ func (t *Telegram) Edit(ctx context.Context, messageID int, html string) error {
 	return err
 }
 
+// SendTo posts an HTML message to a private chat (alerts and command replies).
+func (t *Telegram) SendTo(ctx context.Context, chatID int64, html string) error {
+	noPreview := true
+	_, err := t.bot.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:             chatID,
+		Text:               html,
+		ParseMode:          models.ParseModeHTML,
+		LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: &noPreview},
+	})
+	return err
+}
+
+// Ping checks that Telegram answers (getMe).
+func (t *Telegram) Ping(ctx context.Context) error {
+	_, err := t.bot.GetMe(ctx)
+	return err
+}
+
+// Listen receives messages to the bot (long polling) until ctx is
+// cancelled. They go to the handler given to NewTelegram via
+// bot.WithDefaultHandler.
+func (t *Telegram) Listen(ctx context.Context) error {
+	t.bot.Start(ctx)
+	return nil
+}
+
 // retryAfter returns how long Telegram asked to wait (429), or 0.
 func retryAfter(err error) time.Duration {
 	var tooMany *bot.TooManyRequestsError
