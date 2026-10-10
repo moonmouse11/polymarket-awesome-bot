@@ -1,4 +1,4 @@
-.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state excluded-tags lint fmt test check notify-queue notify-backfill
+.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state excluded-tags lint fmt test check notify-queue notify-backfill notify-reformat notify-edits-stop
 
 .DEFAULT_GOAL := help
 
@@ -54,10 +54,16 @@ awesome-sample: ## Show 10 random open awesome markets
 	@$(ENV); $(MONGOSH) --eval 'db.markets.aggregate([{$$match: {is_awesome: true, closed: false}}, {$$sample: {size: 10}}, {$$project: {question: 1, tags: 1}}]).forEach(m => print(m._id + "  " + m.question + "  [" + (m.tags || []).join(", ") + "]"))'
 
 notify-queue: ## Markets waiting for a Telegram notification, and the last sent
-	@$(ENV); $(MONGOSH) --eval 'print("pending:", db.markets.countDocuments({notify_pending: true})); db.markets.find({notified_at: {$$exists: true}}, {question: 1, notified_at: 1}).sort({notified_at: -1}).limit(5).forEach(m => print(m.notified_at.toISOString() + "  " + m.question))'
+	@$(ENV); $(MONGOSH) --eval 'print("pending:", db.markets.countDocuments({notify_pending: true}), "edits pending:", db.markets.countDocuments({edit_pending: true})); db.markets.find({notified_at: {$$exists: true}}, {question: 1, notified_at: 1}).sort({notified_at: -1}).limit(5).forEach(m => print(m.notified_at.toISOString() + "  " + m.question))'
 
 notify-backfill: ## Queue all open awesome markets that were never announced (~20 messages/min)
 	@$(ENV); $(MONGOSH) --eval 'const r = db.markets.updateMany({is_awesome: true, closed: false, notified_at: {$$exists: false}}, {$$set: {notify_pending: true}}); print("queued:", r.modifiedCount)'
+
+notify-reformat: ## Re-render and edit all posted channel messages (after a format change; slow)
+	@$(ENV); $(MONGOSH) --eval 'const r = db.markets.updateMany({telegram_message_id: {$$exists: true}}, {$$set: {edit_pending: true}}); print("queued edits:", r.modifiedCount)'
+
+notify-edits-stop: ## Cancel all queued message edits (already edited messages stay as they are)
+	@$(ENV); $(MONGOSH) --eval 'const r = db.markets.updateMany({edit_pending: true}, {$$unset: {edit_pending: ""}}); print("cancelled edits:", r.modifiedCount)'
 
 sync-state: ## Show polling progress (watermark, last successful cycle)
 	@$(ENV); $(MONGOSH) --eval 'printjson(db.sync_state.find().toArray())'

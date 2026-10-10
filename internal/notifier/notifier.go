@@ -31,20 +31,24 @@ const (
 type Queue interface {
 	PendingNotifications(ctx context.Context, limit int64) ([]db.AwesomeMarket, error)
 	MarkNotified(ctx context.Context, id string, at time.Time, messageID int) error
+	PendingEdits(ctx context.Context, limit int64) ([]db.AwesomeMarket, error)
+	MarkEdited(ctx context.Context, id string) error
 }
 
-// Sender posts a message and returns its id (implemented by *Telegram).
+// Sender posts and edits messages (implemented by *Telegram).
 type Sender interface {
 	Send(ctx context.Context, html string) (int, error)
+	Edit(ctx context.Context, messageID int, html string) error
 }
 
-// Notifier sends queued markets one by one.
+// Notifier sends queued markets one by one and edits posted messages.
 type Notifier struct {
 	queue     Queue
 	sender    Sender
 	log       zerolog.Logger
 	sendEvery time.Duration
 	idleWait  time.Duration
+	lastCall  time.Time // last Telegram call, for pacing
 }
 
 func New(queue Queue, sender Sender, log zerolog.Logger) *Notifier {
@@ -57,21 +61,25 @@ func New(queue Queue, sender Sender, log zerolog.Logger) *Notifier {
 	}
 }
 
-// Run sends notifications until ctx is cancelled. Failures are logged and
+// Run sends notifications until ctx is cancelled. New markets go first;
+// edits are made only when nothing waits to be sent. Failures are logged and
 // retried later; they never stop the bot.
 func (n *Notifier) Run(ctx context.Context) error {
 	n.log.Info().Msg("Notifier started")
 	for {
 		wait := n.idleWait
-		sent, err := n.sendBatch(ctx)
+		done, err := n.sendBatch(ctx)
+		if err == nil && done == 0 {
+			done, err = n.editBatch(ctx)
+		}
 		switch {
 		case ctx.Err() != nil:
 		case err != nil:
-			n.log.Warn().Err(err).Msg("Sending notifications failed; will retry")
+			n.log.Warn().Err(err).Msg("Telegram call failed; will retry")
 			if d := retryAfter(err); d > 0 {
 				wait = d
 			}
-		case sent > 0:
+		case done > 0:
 			wait = 0 // the queue may have more
 		}
 
@@ -84,6 +92,20 @@ func (n *Notifier) Run(ctx context.Context) error {
 	}
 }
 
+// pace waits so that Telegram calls are at least sendEvery apart, across
+// batches too: Telegram limits sends and edits together.
+func (n *Notifier) pace(ctx context.Context) error {
+	if wait := time.Until(n.lastCall.Add(n.sendEvery)); wait > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+	n.lastCall = time.Now()
+	return nil
+}
+
 // sendBatch sends up to batchSize queued markets, oldest first. It stops at
 // the first send error so the order is kept and nothing is skipped.
 func (n *Notifier) sendBatch(ctx context.Context) (int, error) {
@@ -92,15 +114,10 @@ func (n *Notifier) sendBatch(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	sent := 0
-	for i, mk := range markets {
-		if i > 0 {
-			select {
-			case <-ctx.Done():
-				return sent, ctx.Err()
-			case <-time.After(n.sendEvery):
-			}
+	for _, mk := range markets {
+		if err := n.pace(ctx); err != nil {
+			return sent, err
 		}
-
 		msgID, err := n.sender.Send(ctx, Format(mk))
 		if err != nil {
 			if !isBadMessage(err) {
@@ -119,10 +136,41 @@ func (n *Notifier) sendBatch(ctx context.Context) (int, error) {
 	return sent, nil
 }
 
+// editBatch re-renders up to batchSize posted messages from the current
+// market data and edits them in the channel.
+func (n *Notifier) editBatch(ctx context.Context) (int, error) {
+	markets, err := n.queue.PendingEdits(ctx, batchSize)
+	if err != nil {
+		return 0, err
+	}
+	edited := 0
+	for _, mk := range markets {
+		if err := n.pace(ctx); err != nil {
+			return edited, err
+		}
+		if err := n.sender.Edit(ctx, mk.MessageID, Format(mk)); err != nil {
+			if !isBadMessage(err) {
+				return edited, fmt.Errorf("edit message %d (market %s): %w", mk.MessageID, mk.ID, err)
+			}
+			// E.g. the message was deleted from the channel.
+			n.log.Error().Err(err).Str("market", mk.ID).Int("message", mk.MessageID).Msg("Telegram rejected the edit; skipping market")
+		}
+		if err := n.queue.MarkEdited(ctx, mk.ID); err != nil {
+			return edited, err
+		}
+		edited++
+		n.log.Debug().Str("market", mk.ID).Int("message", mk.MessageID).Msg("Message edited")
+	}
+	if edited > 0 {
+		n.log.Info().Int("edited", edited).Msg("Channel messages edited")
+	}
+	return edited, nil
+}
+
 // Format builds the HTML message for a market. Sections are separated by an
 // empty line; the link is a text link, so no URL is shown.
 func Format(mk db.AwesomeMarket) string {
-	sections := []string{"🛸 <b>" + html.EscapeString(mk.Question) + "</b>"}
+	sections := []string{"<b>" + html.EscapeString(mk.Question) + "</b>"}
 
 	var odds []string
 	for i, outcome := range mk.Outcomes {
@@ -160,6 +208,11 @@ func Format(mk db.AwesomeMarket) string {
 // reason says why the market passed. The rule is negative (awesome unless
 // filtered out), so for most markets the honest answer is "not filtered".
 func reason(mk db.AwesomeMarket) string {
+	if mk.Reason == db.ReasonExcludedTag {
+		// Edits re-render messages: the market may have been filtered out
+		// since it was posted (e.g. a tag was added to excluded_tags).
+		return fmt.Sprintf("⛔ Not awesome anymore\n(excluded tag «%s»)", html.EscapeString(mk.ExcludedBy))
+	}
 	if mk.Reason == db.ReasonWords && len(mk.Words) > 0 {
 		return fmt.Sprintf("🔑 Passed: keyword %s\n(overrides excluded tag «%s»)",
 			quoteAll(mk.Words), html.EscapeString(mk.ExcludedBy))

@@ -83,6 +83,23 @@ func (t *Telegram) Send(ctx context.Context, html string) (int, error) {
 	return msg.ID, nil
 }
 
+// Edit replaces the text of a posted message. Editing does not notify
+// subscribers. An unchanged text is not an error.
+func (t *Telegram) Edit(ctx context.Context, messageID int, html string) error {
+	noPreview := true
+	_, err := t.bot.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:             t.chatID,
+		MessageID:          messageID,
+		Text:               html,
+		ParseMode:          models.ParseModeHTML,
+		LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: &noPreview},
+	})
+	if err != nil && strings.Contains(err.Error(), "message is not modified") {
+		return nil
+	}
+	return err
+}
+
 // retryAfter returns how long Telegram asked to wait (429), or 0.
 func retryAfter(err error) time.Duration {
 	var tooMany *bot.TooManyRequestsError

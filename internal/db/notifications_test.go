@@ -118,3 +118,34 @@ func TestNotifications_QueueFollowsTransitions(t *testing.T) {
 		}
 	}
 }
+
+func TestNotifications_EditQueue(t *testing.T) {
+	m := newTestMongo(t)
+	ctx := context.Background()
+	if err := m.EnsureMarketIndexes(ctx); err != nil {
+		t.Fatalf("EnsureMarketIndexes: %v", err)
+	}
+	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "a", Question: "A?"}, {ID: "b", Question: "B?"}}, time.Now()); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := m.MarkNotified(ctx, "a", time.Now(), 7); err != nil {
+		t.Fatalf("MarkNotified: %v", err)
+	}
+	// What `make notify-reformat` does.
+	if _, err := m.db.Collection(marketsCollection).UpdateMany(ctx,
+		bson.D{{Key: fieldMessageID, Value: bson.D{{Key: "$exists", Value: true}}}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: fieldEditPending, Value: true}}}}); err != nil {
+		t.Fatalf("queue edits: %v", err)
+	}
+
+	edits, err := m.PendingEdits(ctx, 10)
+	if err != nil || len(edits) != 1 || edits[0].ID != "a" || edits[0].MessageID != 7 {
+		t.Fatalf("PendingEdits = %+v, %v; want market a with message 7", edits, err)
+	}
+	if err := m.MarkEdited(ctx, "a"); err != nil {
+		t.Fatalf("MarkEdited: %v", err)
+	}
+	if edits, _ := m.PendingEdits(ctx, 10); len(edits) != 0 {
+		t.Fatalf("PendingEdits after edit = %v, want none", edits)
+	}
+}

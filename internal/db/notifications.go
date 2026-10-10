@@ -18,6 +18,7 @@ type AwesomeMarket struct {
 	Words             []string  `bson:"awesome_words,omitempty"`
 	ExcludedBy        string    `bson:"awesome_excluded_tag,omitempty"` // overridden by Words
 	Since             time.Time `bson:"awesome_since"`
+	MessageID         int       `bson:"telegram_message_id,omitempty"`
 }
 
 // PendingNotifications returns up to limit markets that became awesome while
@@ -55,6 +56,35 @@ func (m *MongoDB) MarkNotified(ctx context.Context, id string, at time.Time, mes
 	)
 	if err != nil {
 		return fmt.Errorf("mark market %s notified: %w", id, err)
+	}
+	return nil
+}
+
+// PendingEdits returns up to limit announced markets whose channel message
+// must be edited, oldest message first.
+func (m *MongoDB) PendingEdits(ctx context.Context, limit int64) ([]AwesomeMarket, error) {
+	cur, err := m.db.Collection(marketsCollection).Find(ctx,
+		bson.D{{Key: fieldEditPending, Value: true}},
+		options.Find().SetSort(bson.D{{Key: fieldMessageID, Value: 1}}).SetLimit(limit),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("find pending edits: %w", err)
+	}
+	var out []AwesomeMarket
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("decode pending edits: %w", err)
+	}
+	return out, nil
+}
+
+// MarkEdited removes the market from the edit queue.
+func (m *MongoDB) MarkEdited(ctx context.Context, id string) error {
+	_, err := m.db.Collection(marketsCollection).UpdateOne(ctx,
+		bson.D{{Key: "_id", Value: id}},
+		bson.D{{Key: "$unset", Value: bson.D{{Key: fieldEditPending, Value: ""}}}},
+	)
+	if err != nil {
+		return fmt.Errorf("mark market %s edited: %w", id, err)
 	}
 	return nil
 }

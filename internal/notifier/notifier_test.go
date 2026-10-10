@@ -21,6 +21,17 @@ type fakeQueue struct {
 	pending  []db.AwesomeMarket
 	notified []string
 	msgIDs   []int
+	edits    []db.AwesomeMarket
+	edited   []string
+}
+
+func (f *fakeQueue) PendingEdits(context.Context, int64) ([]db.AwesomeMarket, error) {
+	return f.edits, nil
+}
+
+func (f *fakeQueue) MarkEdited(_ context.Context, id string) error {
+	f.edited = append(f.edited, id)
+	return nil
 }
 
 func (f *fakeQueue) PendingNotifications(context.Context, int64) ([]db.AwesomeMarket, error) {
@@ -34,8 +45,15 @@ func (f *fakeQueue) MarkNotified(_ context.Context, id string, _ time.Time, mess
 }
 
 type fakeSender struct {
-	errs map[int]error // error for the n-th call (0-based)
-	sent []string
+	errs   map[int]error // error for the n-th Send (0-based)
+	sent   []string
+	edits  []int // edited message ids
+	editEr error
+}
+
+func (f *fakeSender) Edit(_ context.Context, messageID int, _ string) error {
+	f.edits = append(f.edits, messageID)
+	return f.editEr
 }
 
 // Send returns message ids 101, 102, ...
@@ -96,6 +114,48 @@ func TestSendBatch_SkipsRejectedMessage(t *testing.T) {
 	}
 }
 
+func TestEditBatch_EditsAndSkipsDeleted(t *testing.T) {
+	m1, m2 := market("1", "A?"), market("2", "B?")
+	m1.MessageID, m2.MessageID = 11, 12
+	q := &fakeQueue{edits: []db.AwesomeMarket{m1, m2}}
+	s := &fakeSender{}
+	edited, err := newTestNotifier(q, s).editBatch(context.Background())
+	if err != nil || edited != 2 {
+		t.Fatalf("editBatch = %d, %v; want 2, nil", edited, err)
+	}
+	if len(s.edits) != 2 || s.edits[0] != 11 || s.edits[1] != 12 || strings.Join(q.edited, ",") != "1,2" {
+		t.Errorf("edited messages %v, markets %v; want [11 12], [1 2]", s.edits, q.edited)
+	}
+
+	// A message deleted from the channel: skipped, not retried forever.
+	q = &fakeQueue{edits: []db.AwesomeMarket{m1}}
+	s = &fakeSender{editEr: fmt.Errorf("%w, message to edit not found", bot.ErrorBadRequest)}
+	if _, err := newTestNotifier(q, s).editBatch(context.Background()); err != nil || len(q.edited) != 1 {
+		t.Errorf("editBatch = %v, edited %v; want nil, [1]", err, q.edited)
+	}
+
+	// Telegram down: the market stays in the edit queue.
+	q = &fakeQueue{edits: []db.AwesomeMarket{m1}}
+	s = &fakeSender{editEr: errors.New("network down")}
+	if _, err := newTestNotifier(q, s).editBatch(context.Background()); err == nil || len(q.edited) != 0 {
+		t.Errorf("editBatch = %v, edited %v; want an error and nothing marked", err, q.edited)
+	}
+}
+
+func TestPace_SpacesCallsAcrossBatches(t *testing.T) {
+	n := newTestNotifier(&fakeQueue{}, &fakeSender{})
+	n.sendEvery = 50 * time.Millisecond
+	start := time.Now()
+	for range 3 {
+		if err := n.pace(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if took := time.Since(start); took < 100*time.Millisecond {
+		t.Errorf("3 calls took %v, want ≥ 2 × sendEvery", took)
+	}
+}
+
 func TestFormat(t *testing.T) {
 	end := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 	base := polymarket.Market{
@@ -108,7 +168,7 @@ func TestFormat(t *testing.T) {
 		EndDate:       &end,
 		Tags:          []string{"Sports", "Middle East"},
 	}
-	head := "🛸 <b>Will &lt;aliens&gt; &amp; UFOs land?</b>\n\n" +
+	head := "<b>Will &lt;aliens&gt; &amp; UFOs land?</b>\n\n" +
 		"Yes 12% · No 88%\nVolume $48k · Ends Oct 31, 2026\n\n"
 	tail := "\n\n#Sports #MiddleEast" +
 		"\n\n<a href=\"https://polymarket.com/event/aliens-land/aliens-land-2027\">Open on Polymarket</a>"
@@ -122,6 +182,8 @@ func TestFormat(t *testing.T) {
 			head + "🔑 Passed: keyword «alien», «ufo»\n(overrides excluded tag «Sports»)" + tail},
 		{"not filtered", db.AwesomeMarket{Market: base, Reason: db.ReasonTags},
 			head + "✅ Passed: not filtered\n(none of the excluded tags)" + tail},
+		{"filtered out since posted", db.AwesomeMarket{Market: base, Reason: db.ReasonExcludedTag, ExcludedBy: "Sports"},
+			head + "⛔ Not awesome anymore\n(excluded tag «Sports»)" + tail},
 		{"not filtered with words", db.AwesomeMarket{Market: base, Reason: db.ReasonTags, Words: []string{"ufo"}},
 			head + "✅ Passed: not filtered\n(none of the excluded tags)\nKeywords found: «ufo»" + tail},
 	}

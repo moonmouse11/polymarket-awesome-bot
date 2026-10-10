@@ -21,6 +21,7 @@ const (
 	fieldNotifyPending    = "notify_pending"      // true: an open market became awesome and waits for a notification
 	fieldNotifiedAt       = "notified_at"         // when the notification was sent; never cleared, so no repeats
 	fieldMessageID        = "telegram_message_id" // channel message about the market, to edit it later
+	fieldEditPending      = "edit_pending"        // true: the channel message must be re-rendered and edited
 )
 
 // Values of awesome_reason.
