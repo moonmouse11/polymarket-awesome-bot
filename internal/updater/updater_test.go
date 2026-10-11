@@ -43,12 +43,12 @@ type fakeStore struct {
 	maxUpdated time.Time
 	upserted   []string
 	marked     [][]string
-	excluded   []string
+	rules      db.FilterRules
 	onSave     func() // called after the closed pass is saved
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{state: map[string]db.SyncState{}, excluded: []string{"Sports"}}
+	return &fakeStore{state: map[string]db.SyncState{}, rules: db.FilterRules{DenyTags: []string{"Sports"}, AllowWords: []string{"alien"}}}
 }
 
 func (f *fakeStore) GetSyncState(_ context.Context, id string) (*db.SyncState, error) {
@@ -78,10 +78,7 @@ func (f *fakeStore) UpsertMarkets(_ context.Context, ms []polymarket.Market, _ t
 	return 0, nil
 }
 
-func (f *fakeStore) ListExcludedTags(context.Context) ([]string, error) {
-	return f.excluded, nil
-}
-func (f *fakeStore) ListKeywords(context.Context) ([]string, error) { return []string{"alien"}, nil }
+func (f *fakeStore) FilterRules(context.Context) (db.FilterRules, error) { return f.rules, nil }
 
 func (f *fakeStore) MarkAwesomeIDs(_ context.Context, ids, _, _ []string) (int64, error) {
 	f.marked = append(f.marked, ids)
@@ -125,14 +122,14 @@ func TestPass_BootstrapsFromDBAndStopsAtOverlap(t *testing.T) {
 	}
 }
 
-func TestPass_NoExcludedTagsPausesUpdates(t *testing.T) {
+func TestPass_NoDenyRulesPausesUpdates(t *testing.T) {
 	store := newFakeStore()
-	store.excluded = nil
+	store.rules = db.FilterRules{AllowTags: []string{"AI"}} // allow rules alone filter nothing
 	store.state["markets_open"] = db.SyncState{ID: "markets_open", Watermark: base}
 
 	src := &fakeSource{pages: [][]polymarket.Market{{{ID: "new", UpdatedAt: at(time.Minute)}}}}
-	if _, err := newTestUpdater(src, store).pass(context.Background(), false); !errors.Is(err, ErrNoExcludedTags) {
-		t.Fatalf("pass error = %v, want ErrNoExcludedTags", err)
+	if _, err := newTestUpdater(src, store).pass(context.Background(), false); !errors.Is(err, ErrNoDenyRules) {
+		t.Fatalf("pass error = %v, want ErrNoDenyRules", err)
 	}
 	if len(store.upserted) != 0 || len(store.marked) != 0 {
 		t.Errorf("upserted %v, marked %v; want nothing written", store.upserted, store.marked)

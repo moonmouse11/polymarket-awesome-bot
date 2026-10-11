@@ -78,23 +78,19 @@ func run(log zerolog.Logger) error {
 	log.Info().Msg("Connected to MongoDB")
 
 	// Filter rules live only in MongoDB; the updater reads them every pass.
-	if err := mongoDB.EnsureKeywords(dbCtx); err != nil {
-		return fmt.Errorf("prepare keywords collection: %w", err)
+	if err := mongoDB.EnsureFilterRules(dbCtx); err != nil {
+		return fmt.Errorf("prepare filter rules collection: %w", err)
 	}
-	if err := mongoDB.EnsureExcludedTags(dbCtx); err != nil {
-		return fmt.Errorf("prepare excluded tags collection: %w", err)
-	}
-	keywords, err := mongoDB.ListKeywords(dbCtx)
+	rules, err := mongoDB.FilterRules(dbCtx)
 	if err != nil {
-		return fmt.Errorf("load keywords: %w", err)
+		return fmt.Errorf("load filter rules: %w", err)
 	}
-	excluded, err := mongoDB.ListExcludedTags(dbCtx)
-	if err != nil {
-		return fmt.Errorf("load excluded tags: %w", err)
-	}
-	log.Info().Int("excluded_tags", len(excluded)).Int("keywords", len(keywords)).Msg("Loaded filter rules from MongoDB")
-	if len(excluded) == 0 {
-		log.Warn().Msg("No excluded tags: market updates stay paused until tags are added (make filter-tag-add tag=...)")
+	log.Info().
+		Int("allow_tags", len(rules.AllowTags)).Int("deny_tags", len(rules.DenyTags)).
+		Int("allow_words", len(rules.AllowWords)).Int("deny_words", len(rules.DenyWords)).
+		Msg("Loaded filter rules from MongoDB")
+	if rules.Empty() {
+		log.Warn().Msg("No deny rules: market updates stay paused until one is added (make rule-add)")
 	}
 	// No timeout: building a new index on millions of markets takes minutes.
 	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {

@@ -1,5 +1,5 @@
 // Command mark-awesome recomputes the awesome fields for all stored markets
-// from the excluded_tags and keywords collections. Run it manually: make markets-awesome.
+// from the filter_rules collection. Run it manually: make markets-awesome.
 package main
 
 import (
@@ -63,30 +63,23 @@ func run(ctx context.Context, log zerolog.Logger) error {
 	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {
 		return err
 	}
-	if err := mongoDB.EnsureExcludedTags(dbCtx); err != nil {
+	if err := mongoDB.EnsureFilterRules(dbCtx); err != nil {
 		return err
 	}
-	excluded, err := mongoDB.ListExcludedTags(dbCtx)
+	rules, err := mongoDB.FilterRules(dbCtx)
 	if err != nil {
 		return err
 	}
-	if len(excluded) == 0 {
+	if rules.Empty() {
 		// Every market would become awesome.
-		return errors.New("excluded_tags is empty: add tags with make filter-tag-add tag=... first")
-	}
-	if err := mongoDB.EnsureKeywords(dbCtx); err != nil {
-		return err
-	}
-	keywords, err := mongoDB.ListKeywords(dbCtx)
-	if err != nil {
-		return err
+		return errors.New("no deny rules in filter_rules: add one with make rule-add first")
 	}
 
-	log.Info().Strs("excluded_tags", excluded).Strs("keywords", keywords).Msg("Awesome marking started")
+	log.Info().Interface("rules", rules).Msg("Awesome marking started")
 	started := time.Now()
 
 	// No timeout: one update over millions of documents takes minutes.
-	matched, err := mongoDB.MarkAwesome(ctx, excluded, keywords)
+	matched, err := mongoDB.MarkAwesome(ctx, rules.DenyTags, rules.AllowWords)
 	if err != nil {
 		return err
 	}

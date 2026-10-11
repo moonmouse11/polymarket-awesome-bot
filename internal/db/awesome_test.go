@@ -164,33 +164,3 @@ func TestUpsertMarkets_KeepsAwesomeFields(t *testing.T) {
 		t.Errorf("API fields not updated: %+v", got)
 	}
 }
-
-func TestEnsureExcludedTags_DoesNotSeedAndListsSorted(t *testing.T) {
-	m := newTestMongo(t)
-	ctx := context.Background()
-
-	if err := m.EnsureExcludedTags(ctx); err != nil {
-		t.Fatalf("EnsureExcludedTags: %v", err)
-	}
-	if got, err := m.ListExcludedTags(ctx); err != nil || len(got) != 0 {
-		t.Fatalf("ListExcludedTags = %v, %v; want none: rules live only in the database", got, err)
-	}
-
-	coll := m.db.Collection(excludedTagsCollection)
-	for _, tag := range []string{"Weather", "Sports"} {
-		if _, err := coll.InsertOne(ctx, ExcludedTag{Tag: tag, CreatedAt: time.Now()}); err != nil {
-			t.Fatalf("insert %q: %v", tag, err)
-		}
-	}
-	if _, err := coll.InsertOne(ctx, ExcludedTag{Tag: "Sports", CreatedAt: time.Now()}); err == nil {
-		t.Error("inserting a duplicate tag succeeded, want unique index error")
-	}
-
-	got, err := m.ListExcludedTags(ctx)
-	if err != nil {
-		t.Fatalf("ListExcludedTags: %v", err)
-	}
-	if len(got) != 2 || got[0] != "Sports" || got[1] != "Weather" {
-		t.Fatalf("ListExcludedTags = %v, want [Sports Weather]", got)
-	}
-}

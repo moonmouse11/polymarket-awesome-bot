@@ -246,7 +246,7 @@ func Format(mk db.AwesomeMarket) string {
 func reason(mk db.AwesomeMarket) string {
 	if mk.Reason == db.ReasonExcludedTag {
 		// Edits re-render messages: the market may have been filtered out
-		// since it was posted (e.g. a tag was added to excluded_tags).
+		// since it was posted (e.g. its tag became a deny rule).
 		return fmt.Sprintf("⛔ Not awesome anymore\n(excluded tag «%s»)", html.EscapeString(mk.ExcludedBy))
 	}
 	if mk.Reason == db.ReasonWords && len(mk.Words) > 0 {

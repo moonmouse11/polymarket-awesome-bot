@@ -27,10 +27,10 @@ const (
 	catchUpPages = 10
 )
 
-// ErrNoExcludedTags pauses updates: without excluded tags every market is
+// ErrNoDenyRules pauses updates: without deny rules every market is
 // awesome and the channel would be flooded. The watermark stays, so once
-// tags are added the next cycle processes everything missed.
-var ErrNoExcludedTags = errors.New("excluded_tags is empty, market updates are paused until tags are added with make filter-tag-add")
+// rules are added the next cycle processes everything missed.
+var ErrNoDenyRules = errors.New("no deny rules in filter_rules, market updates are paused until one is added with make rule-add")
 
 // Source is the Polymarket API (implemented by *polymarket.Client).
 type Source interface {
@@ -43,8 +43,7 @@ type Store interface {
 	SaveSyncState(ctx context.Context, st db.SyncState) error
 	MaxUpdatedAt(ctx context.Context, closed bool) (time.Time, bool, error)
 	UpsertMarkets(ctx context.Context, markets []polymarket.Market, syncedAt time.Time) (int, error)
-	ListExcludedTags(ctx context.Context) ([]string, error)
-	ListKeywords(ctx context.Context) ([]string, error)
+	FilterRules(ctx context.Context) (db.FilterRules, error)
 	MarkAwesomeIDs(ctx context.Context, ids, excluded, keywords []string) (int64, error)
 }
 
@@ -176,16 +175,12 @@ func (u *Updater) pass(ctx context.Context, closed bool) (int, error) {
 	stopBefore := watermark.Add(-u.overlap)
 
 	// Read once per pass: edits in the DB apply from the next cycle.
-	excluded, err := u.store.ListExcludedTags(ctx)
+	rules, err := u.store.FilterRules(ctx)
 	if err != nil {
 		return 0, err
 	}
-	if len(excluded) == 0 {
-		return 0, ErrNoExcludedTags
-	}
-	keywords, err := u.store.ListKeywords(ctx)
-	if err != nil {
-		return 0, err
+	if rules.Empty() {
+		return 0, ErrNoDenyRules
 	}
 
 	newest := watermark
@@ -214,7 +209,9 @@ func (u *Updater) pass(ctx context.Context, closed bool) (int, error) {
 		for _, mk := range fresh {
 			ids = append(ids, mk.ID)
 		}
-		if _, err := u.store.MarkAwesomeIDs(ctx, ids, excluded, keywords); err != nil {
+		// The marking pipeline still knows two lists only: deny tags and
+		// overriding allow words. Allow tags and deny words come next.
+		if _, err := u.store.MarkAwesomeIDs(ctx, ids, rules.DenyTags, rules.AllowWords); err != nil {
 			return false, err
 		}
 		total += len(fresh)
