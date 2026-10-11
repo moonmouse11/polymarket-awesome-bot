@@ -32,7 +32,7 @@ New awesome markets are posted to the Telegram channel **[Polymarket Search](htt
 |---|---|
 | Full load of all markets (open and closed) into MongoDB | ✅ done, manual command `make markets-load` |
 | Awesome marking by tags (`make markets-awesome`) | ✅ draft rule: everything except excluded tags |
-| `keywords` collection with initial seed | ✅ done |
+| Filter rules (`excluded_tags`, `keywords`) only in MongoDB, edited with `make` | ✅ done |
 | Health check (`/health`), graceful shutdown | ✅ done |
 | Keyword analyzer (`KeywordAnalyzer`) | 🚧 code and tests exist, not wired into the bot yet |
 | AI analyzer Jev | 🚧 stub, waiting for API early access |
@@ -79,7 +79,7 @@ curl http://127.0.0.1:8080/health   # OK
 `make help` lists all commands.
 
 > [!WARNING]
-> `make clean` deletes the MongoDB data volume: all loaded markets and keyword edits are lost. MongoDB users are recreated from the passwords currently in `.env`.
+> `make clean` deletes the MongoDB data volume: all loaded markets and the filter rules (`excluded_tags`, `keywords`) are lost — nothing is seeded back, market updates stay paused until excluded tags are added again. MongoDB users are recreated from the passwords currently in `.env`.
 
 ### MongoDB users
 
@@ -145,15 +145,21 @@ make notify-backfill    # queue all open awesome markets never announced (slow, 
 make notify-reformat    # re-render and edit all posted messages after a format change (slow)
 make notify-edits-stop  # cancel queued edits; edited messages stay as they are
 make excluded-tags      # current excluded tags
+make keywords           # current keywords
 ```
 
-Excluded tags live in the `excluded_tags` collection and are matched exactly as Polymarket spells them. Edit the list in the database, then run `make markets-awesome` again:
+#### Filter rules
+
+The rules live only in MongoDB — there are no defaults in the code. `excluded_tags` holds Polymarket tags, matched exactly (case-sensitive); `keywords` holds lowercase words that override an excluded tag:
 
 ```bash
-set -a; . ./.env; set +a
-docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.excluded_tags.insertOne({tag: "Mentions", created_at: new Date()})'
-docker compose exec mongodb mongosh "$MONGO_URI" --eval 'db.excluded_tags.deleteOne({tag: "Economy"})'
+make filter-tag-add tag="Soccer"       # warns if no market has this tag (typo?)
+make filter-tag-remove tag="Games"
+make keyword-add word="elon musk"
+make keyword-remove word="fight"
 ```
+
+The bot reads the rules every cycle, so a change applies to markets updated from then on; `make markets-awesome` recomputes all markets (and queues the ones that became awesome for the channel). With no excluded tags every market would be awesome, so the bot pauses market updates (the admins get the "Market updates are failing" alert) and `make markets-awesome` refuses to run.
 
 These commands read `MONGO_URI` from `.env` and run `mongosh` inside the `mongodb` container. Any query:
 

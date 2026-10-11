@@ -5,26 +5,14 @@ import (
 	"strings"
 )
 
-// DefaultKeywords is the initial trigger word list. It seeds the "keywords"
-// collection when that collection is empty.
-var DefaultKeywords = []string{
-	"alien", "simulation", "fight", "drama", "ufo", "prison",
-	"assassination", "nuclear", "zombie", "elon musk", "arrest",
-	"conspiracy", "faked", "matrix", "boxing",
-}
-
 // KeywordAnalyzer uses predefined trigger words to catch obviously awesome markets
 type KeywordAnalyzer struct {
 	TriggerWords []string
 }
 
 func NewKeywordAnalyzer(triggerWords []string) *KeywordAnalyzer {
-	words := triggerWords
-	if len(words) == 0 {
-		words = DefaultKeywords
-	}
 	return &KeywordAnalyzer{
-		TriggerWords: words,
+		TriggerWords: triggerWords,
 	}
 }
 

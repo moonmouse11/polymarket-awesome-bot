@@ -36,7 +36,7 @@ func TestHybridAnalyzer_LogsWarningWhenJevFails(t *testing.T) {
 
 func TestHybridAnalyzer_KeywordMatchSkipsJev(t *testing.T) {
 	var buf bytes.Buffer
-	h := NewHybridAnalyzer("", nil, zerolog.New(&buf))
+	h := NewHybridAnalyzer("", []string{"alien"}, zerolog.New(&buf))
 
 	res, err := h.Analyze(context.Background(), MarketEvent{ID: "1", Title: "Will aliens be found?"})
 	if err != nil {

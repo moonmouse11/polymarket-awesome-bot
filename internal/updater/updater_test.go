@@ -43,10 +43,13 @@ type fakeStore struct {
 	maxUpdated time.Time
 	upserted   []string
 	marked     [][]string
+	excluded   []string
 	onSave     func() // called after the closed pass is saved
 }
 
-func newFakeStore() *fakeStore { return &fakeStore{state: map[string]db.SyncState{}} }
+func newFakeStore() *fakeStore {
+	return &fakeStore{state: map[string]db.SyncState{}, excluded: []string{"Sports"}}
+}
 
 func (f *fakeStore) GetSyncState(_ context.Context, id string) (*db.SyncState, error) {
 	st, ok := f.state[id]
@@ -76,7 +79,7 @@ func (f *fakeStore) UpsertMarkets(_ context.Context, ms []polymarket.Market, _ t
 }
 
 func (f *fakeStore) ListExcludedTags(context.Context) ([]string, error) {
-	return []string{"Sports"}, nil
+	return f.excluded, nil
 }
 func (f *fakeStore) ListKeywords(context.Context) ([]string, error) { return []string{"alien"}, nil }
 
@@ -119,6 +122,23 @@ func TestPass_BootstrapsFromDBAndStopsAtOverlap(t *testing.T) {
 	st := store.state["markets_open"]
 	if !st.Watermark.Equal(*at(10 * time.Minute)) || st.LastMarkets != 3 {
 		t.Errorf("state = %+v, want watermark %v and 3 markets", st, *at(10 * time.Minute))
+	}
+}
+
+func TestPass_NoExcludedTagsPausesUpdates(t *testing.T) {
+	store := newFakeStore()
+	store.excluded = nil
+	store.state["markets_open"] = db.SyncState{ID: "markets_open", Watermark: base}
+
+	src := &fakeSource{pages: [][]polymarket.Market{{{ID: "new", UpdatedAt: at(time.Minute)}}}}
+	if _, err := newTestUpdater(src, store).pass(context.Background(), false); !errors.Is(err, ErrNoExcludedTags) {
+		t.Fatalf("pass error = %v, want ErrNoExcludedTags", err)
+	}
+	if len(store.upserted) != 0 || len(store.marked) != 0 {
+		t.Errorf("upserted %v, marked %v; want nothing written", store.upserted, store.marked)
+	}
+	if st := store.state["markets_open"]; !st.Watermark.Equal(base) {
+		t.Errorf("watermark moved to %v, want %v", st.Watermark, base)
 	}
 }
 

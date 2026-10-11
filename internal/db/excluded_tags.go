@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -21,35 +20,16 @@ type ExcludedTag struct {
 	CreatedAt time.Time          `bson:"created_at"`
 }
 
-// EnsureExcludedTags creates a unique index on "tag" and seeds the defaults
-// only if the collection is empty, so tags edited in the DB survive.
-// Tags are stored as given: they must match Polymarket labels exactly.
-func (m *MongoDB) EnsureExcludedTags(ctx context.Context, defaults []string) error {
-	coll := m.db.Collection(excludedTagsCollection)
-
-	_, err := coll.Indexes().CreateOne(ctx, mongo.IndexModel{
+// EnsureExcludedTags creates a unique index on "tag". Tags live only in the
+// database and are stored as given: they must match Polymarket labels
+// exactly. Nothing is seeded; with no tags the updater pauses.
+func (m *MongoDB) EnsureExcludedTags(ctx context.Context) error {
+	_, err := m.db.Collection(excludedTagsCollection).Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys:    bson.D{{Key: "tag", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	})
 	if err != nil {
 		return fmt.Errorf("create excluded tags index: %w", err)
-	}
-
-	count, err := coll.CountDocuments(ctx, bson.D{})
-	if err != nil {
-		return fmt.Errorf("count excluded tags: %w", err)
-	}
-	if count > 0 || len(defaults) == 0 {
-		return nil
-	}
-
-	now := time.Now().UTC()
-	docs := make([]interface{}, 0, len(defaults))
-	for _, t := range defaults {
-		docs = append(docs, ExcludedTag{Tag: strings.TrimSpace(t), CreatedAt: now})
-	}
-	if _, err := coll.InsertMany(ctx, docs); err != nil {
-		return fmt.Errorf("seed excluded tags: %w", err)
 	}
 	return nil
 }

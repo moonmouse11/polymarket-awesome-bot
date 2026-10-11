@@ -12,7 +12,6 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/admin"
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/analyzer"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/health"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
@@ -78,19 +77,24 @@ func run(log zerolog.Logger) error {
 	}()
 	log.Info().Msg("Connected to MongoDB")
 
-	if err := mongoDB.EnsureKeywords(dbCtx, analyzer.DefaultKeywords); err != nil {
+	// Filter rules live only in MongoDB; the updater reads them every pass.
+	if err := mongoDB.EnsureKeywords(dbCtx); err != nil {
 		return fmt.Errorf("prepare keywords collection: %w", err)
 	}
-	log.Info().Msg("Keywords collection is ready")
-
-	keywordWords, err := mongoDB.ListKeywords(dbCtx)
+	if err := mongoDB.EnsureExcludedTags(dbCtx); err != nil {
+		return fmt.Errorf("prepare excluded tags collection: %w", err)
+	}
+	keywords, err := mongoDB.ListKeywords(dbCtx)
 	if err != nil {
 		return fmt.Errorf("load keywords: %w", err)
 	}
-	log.Info().Int("count", len(keywordWords)).Msg("Loaded keywords from MongoDB")
-
-	if err := mongoDB.EnsureExcludedTags(dbCtx, analyzer.DefaultExcludedTags); err != nil {
-		return fmt.Errorf("prepare excluded tags collection: %w", err)
+	excluded, err := mongoDB.ListExcludedTags(dbCtx)
+	if err != nil {
+		return fmt.Errorf("load excluded tags: %w", err)
+	}
+	log.Info().Int("excluded_tags", len(excluded)).Int("keywords", len(keywords)).Msg("Loaded filter rules from MongoDB")
+	if len(excluded) == 0 {
+		log.Warn().Msg("No excluded tags: market updates stay paused until tags are added (make filter-tag-add tag=...)")
 	}
 	// No timeout: building a new index on millions of markets takes minutes.
 	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {

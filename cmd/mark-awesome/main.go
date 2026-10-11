@@ -4,13 +4,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/analyzer"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
 	"github.com/rs/zerolog"
@@ -63,14 +63,18 @@ func run(ctx context.Context, log zerolog.Logger) error {
 	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {
 		return err
 	}
-	if err := mongoDB.EnsureExcludedTags(dbCtx, analyzer.DefaultExcludedTags); err != nil {
+	if err := mongoDB.EnsureExcludedTags(dbCtx); err != nil {
 		return err
 	}
 	excluded, err := mongoDB.ListExcludedTags(dbCtx)
 	if err != nil {
 		return err
 	}
-	if err := mongoDB.EnsureKeywords(dbCtx, analyzer.DefaultKeywords); err != nil {
+	if len(excluded) == 0 {
+		// Every market would become awesome.
+		return errors.New("excluded_tags is empty: add tags with make filter-tag-add tag=... first")
+	}
+	if err := mongoDB.EnsureKeywords(dbCtx); err != nil {
 		return err
 	}
 	keywords, err := mongoDB.ListKeywords(dbCtx)

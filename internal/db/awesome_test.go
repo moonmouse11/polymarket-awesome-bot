@@ -165,16 +165,25 @@ func TestUpsertMarkets_KeepsAwesomeFields(t *testing.T) {
 	}
 }
 
-func TestEnsureExcludedTags_SeedsOnlyEmpty(t *testing.T) {
+func TestEnsureExcludedTags_DoesNotSeedAndListsSorted(t *testing.T) {
 	m := newTestMongo(t)
 	ctx := context.Background()
 
-	if err := m.EnsureExcludedTags(ctx, []string{"Sports", " Weather "}); err != nil {
+	if err := m.EnsureExcludedTags(ctx); err != nil {
 		t.Fatalf("EnsureExcludedTags: %v", err)
 	}
-	// Second start with other defaults: the stored list must not change.
-	if err := m.EnsureExcludedTags(ctx, []string{"Crypto"}); err != nil {
-		t.Fatalf("second EnsureExcludedTags: %v", err)
+	if got, err := m.ListExcludedTags(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("ListExcludedTags = %v, %v; want none: rules live only in the database", got, err)
+	}
+
+	coll := m.db.Collection(excludedTagsCollection)
+	for _, tag := range []string{"Weather", "Sports"} {
+		if _, err := coll.InsertOne(ctx, ExcludedTag{Tag: tag, CreatedAt: time.Now()}); err != nil {
+			t.Fatalf("insert %q: %v", tag, err)
+		}
+	}
+	if _, err := coll.InsertOne(ctx, ExcludedTag{Tag: "Sports", CreatedAt: time.Now()}); err == nil {
+		t.Error("inserting a duplicate tag succeeded, want unique index error")
 	}
 
 	got, err := m.ListExcludedTags(ctx)

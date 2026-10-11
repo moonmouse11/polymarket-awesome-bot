@@ -4,6 +4,7 @@ package updater
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -25,6 +26,11 @@ const (
 	// catchUpPages: a cycle with more pages than this is logged at INFO.
 	catchUpPages = 10
 )
+
+// ErrNoExcludedTags pauses updates: without excluded tags every market is
+// awesome and the channel would be flooded. The watermark stays, so once
+// tags are added the next cycle processes everything missed.
+var ErrNoExcludedTags = errors.New("excluded_tags is empty, market updates are paused until tags are added with make filter-tag-add")
 
 // Source is the Polymarket API (implemented by *polymarket.Client).
 type Source interface {
@@ -173,6 +179,9 @@ func (u *Updater) pass(ctx context.Context, closed bool) (int, error) {
 	excluded, err := u.store.ListExcludedTags(ctx)
 	if err != nil {
 		return 0, err
+	}
+	if len(excluded) == 0 {
+		return 0, ErrNoExcludedTags
 	}
 	keywords, err := u.store.ListKeywords(ctx)
 	if err != nil {

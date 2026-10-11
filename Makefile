@@ -1,4 +1,4 @@
-.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state excluded-tags lint fmt test check notify-queue notify-backfill notify-reformat notify-edits-stop
+.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state excluded-tags keywords filter-tag-add filter-tag-remove keyword-add keyword-remove lint fmt test check notify-queue notify-backfill notify-reformat notify-edits-stop
 
 .DEFAULT_GOAL := help
 
@@ -70,6 +70,53 @@ sync-state: ## Show polling progress (watermark, last successful cycle)
 
 excluded-tags: ## List tags that make a market not awesome
 	@$(ENV); $(MONGOSH) --eval 'db.excluded_tags.find({}, {_id: 0, tag: 1}).sort({tag: 1}).forEach(t => print(t.tag))'
+
+keywords: ## List keywords that override an excluded tag
+	@$(ENV); $(MONGOSH) --eval 'db.keywords.find({}, {_id: 0, word: 1}).sort({word: 1}).forEach(k => print(k.word))'
+
+# Filter rules live only in MongoDB. The bot reads them every cycle, so new
+# rules apply to markets updated from now on; `make markets-awesome`
+# recomputes all markets. The value is passed as an environment variable
+# (RULE), so tags with spaces or quotes need no escaping.
+RULES_SHOW = print("excluded tags:", db.excluded_tags.find().sort({tag: 1}).toArray().map(t => t.tag).join(", ") || "(none: market updates are paused)"); \
+	print("keywords:", db.keywords.find().sort({word: 1}).toArray().map(k => k.word).join(", ") || "(none)"); \
+	print("Applies to markets updated from now on; run make markets-awesome to recompute all.")
+RULES_SH = docker compose exec -T -e RULE mongodb mongosh --quiet "$$MONGO_URI"
+
+TAG_ADD_JS = const t = process.env.RULE.trim(); \
+	const r = db.excluded_tags.updateOne({tag: t}, {$$setOnInsert: {tag: t, created_at: new Date()}}, {upsert: true}); \
+	print(r.upsertedCount ? "added: " + t : "already excluded: " + t); \
+	if (!db.markets.findOne({tags: t}, {_id: 1})) print("WARNING: no market has the tag " + JSON.stringify(t) + " (tags are case-sensitive)"); \
+	$(RULES_SHOW)
+TAG_REMOVE_JS = const t = process.env.RULE.trim(); \
+	print(db.excluded_tags.deleteOne({tag: t}).deletedCount ? "removed: " + t : "not excluded: " + t); \
+	$(RULES_SHOW)
+WORD_ADD_JS = const w = process.env.RULE.trim().toLowerCase(); \
+	const r = db.keywords.updateOne({word: w}, {$$setOnInsert: {word: w, created_at: new Date()}}, {upsert: true}); \
+	print(r.upsertedCount ? "added: " + w : "already a keyword: " + w); \
+	$(RULES_SHOW)
+WORD_REMOVE_JS = const w = process.env.RULE.trim().toLowerCase(); \
+	print(db.keywords.deleteOne({word: w}).deletedCount ? "removed: " + w : "not a keyword: " + w); \
+	$(RULES_SHOW)
+
+filter-tag-add filter-tag-remove: export RULE = $(tag)
+keyword-add keyword-remove: export RULE = $(word)
+
+filter-tag-add: ## Exclude a tag, exact Polymarket spelling: make filter-tag-add tag="Soccer"
+	@test -n "$$RULE" || { echo 'usage: make filter-tag-add tag="Soccer"'; exit 2; }
+	@$(ENV); $(RULES_SH) --eval '$(TAG_ADD_JS)'
+
+filter-tag-remove: ## Stop excluding a tag: make filter-tag-remove tag="Games"
+	@test -n "$$RULE" || { echo 'usage: make filter-tag-remove tag="Games"'; exit 2; }
+	@$(ENV); $(RULES_SH) --eval '$(TAG_REMOVE_JS)'
+
+keyword-add: ## Add a keyword (stored lowercase): make keyword-add word="alien"
+	@test -n "$$RULE" || { echo 'usage: make keyword-add word="alien"'; exit 2; }
+	@$(ENV); $(RULES_SH) --eval '$(WORD_ADD_JS)'
+
+keyword-remove: ## Remove a keyword: make keyword-remove word="fight"
+	@test -n "$$RULE" || { echo 'usage: make keyword-remove word="fight"'; exit 2; }
+	@$(ENV); $(RULES_SH) --eval '$(WORD_REMOVE_JS)'
 
 # --- Code quality (golangci-lint runs in Docker, same image as CI) ---
 # Pinned version: the same command must give the same result locally and in CI.
