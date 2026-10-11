@@ -28,6 +28,10 @@ const (
 	batchSize = 20
 	// deleteBatch messages are deleted in one call (Telegram's maximum).
 	deleteBatch = 100
+	// messageLimit is Telegram's 4096 characters minus a margin. The
+	// description gets what the other sections leave; their HTML tags are
+	// counted too, which only adds to the margin.
+	messageLimit = 4000
 )
 
 // Queue is MongoDB (implemented by *db.MongoDB).
@@ -305,12 +309,17 @@ func Format(mk db.AwesomeMarket) string {
 		sections = append(sections, strings.Join(stats, "\n"))
 	}
 
-	sections = append(sections, reason(mk))
+	tail := []string{reason(mk)}
 	if tags := hashtags(mk.Tags); tags != "" {
-		sections = append(sections, tags)
+		tail = append(tail, tags)
 	}
-	sections = append(sections, fmt.Sprintf(`<a href="%s">Open on Polymarket</a>`, html.EscapeString(marketURL(mk))))
-	return strings.Join(sections, "\n\n")
+	tail = append(tail, fmt.Sprintf(`<a href="%s">Open on Polymarket</a>`, html.EscapeString(marketURL(mk))))
+
+	rest := len([]rune(strings.Join(append(sections, tail...), "\n\n"))) + 2 // + the separator
+	if d := description(mk.Description, messageLimit-rest); d != "" {
+		sections = append(sections, d)
+	}
+	return strings.Join(append(sections, tail...), "\n\n")
 }
 
 // reason says why the market passed: the allow rules it matched (they win
@@ -322,16 +331,30 @@ func reason(mk db.AwesomeMarket) string {
 	case db.ReasonDeny:
 		// Edits re-render messages: the market may have been filtered out
 		// since it was posted (e.g. its tag became a deny rule).
-		return "⛔ Not awesome anymore\n(" + deny + ")"
+		return "⛔ Denied by " + deny
 	case db.ReasonAllow:
-		r := "🔑 Passed: " + rules(m.AllowTags, m.AllowWords)
+		r := "🔑 Allowed by " + rules(m.AllowTags, m.AllowWords)
 		if deny != "" {
 			r += "\n(overrides " + deny + ")"
 		}
 		return r
 	default:
-		return "✅ Passed: not filtered\n(no deny rule matched)"
+		return "✅ No deny rule matched"
 	}
+}
+
+// description shows the market's resolution rules as a collapsed quote:
+// Telegram shows the first lines, the rest opens on tap. It is cut to limit
+// characters of text.
+func description(d string, limit int) string {
+	d = strings.TrimSpace(d)
+	if d == "" || limit < 100 {
+		return ""
+	}
+	if r := []rune(d); len(r) > limit {
+		d = strings.TrimSpace(string(r[:limit-1])) + "…"
+	}
+	return "<blockquote expandable>" + html.EscapeString(d) + "</blockquote>"
 }
 
 // rules lists matched rules: "tag «AI», word «alien», «ufo»".

@@ -276,20 +276,46 @@ func TestFormat(t *testing.T) {
 	}{
 		{"allow word overrides a deny tag", db.AwesomeMarket{Market: base, Reason: db.ReasonAllow,
 			Matches: db.Matches{AllowWords: []string{"alien", "ufo"}, DenyTags: []string{"Sports"}}},
-			head + "🔑 Passed: word «alien», «ufo»\n(overrides tag «Sports»)" + tail},
+			head + "🔑 Allowed by word «alien», «ufo»\n(overrides tag «Sports»)" + tail},
 		{"allow tag and word", db.AwesomeMarket{Market: base, Reason: db.ReasonAllow,
 			Matches: db.Matches{AllowTags: []string{"AI"}, AllowWords: []string{"ufo"}}},
-			head + "🔑 Passed: tag «AI», word «ufo»" + tail},
+			head + "🔑 Allowed by tag «AI», word «ufo»" + tail},
 		{"not filtered", db.AwesomeMarket{Market: base, Reason: db.ReasonDefault},
-			head + "✅ Passed: not filtered\n(no deny rule matched)" + tail},
+			head + "✅ No deny rule matched" + tail},
 		{"filtered out since posted", db.AwesomeMarket{Market: base, Reason: db.ReasonDeny,
 			Matches: db.Matches{DenyTags: []string{"Sports"}, DenyWords: []string{"goalscorer"}}},
-			head + "⛔ Not awesome anymore\n(tag «Sports», word «goalscorer»)" + tail},
+			head + "⛔ Denied by tag «Sports», word «goalscorer»" + tail},
 	}
 	for _, tt := range tests {
 		if got := Format(tt.mk); got != tt.want {
 			t.Errorf("%s: Format =\n%s\nwant\n%s", tt.name, got, tt.want)
 		}
+	}
+}
+
+func TestFormat_Description(t *testing.T) {
+	mk := db.AwesomeMarket{Market: polymarket.Market{Question: "Q?", Slug: "q",
+		Description: "  Resolves <Yes> if & only if…\n\nSource: AP.  "}, Reason: db.ReasonDefault}
+	want := "<b>Q?</b>\n\n<blockquote expandable>Resolves &lt;Yes&gt; if &amp; only if…\n\nSource: AP.</blockquote>\n\n✅ No deny rule matched"
+	if got := Format(mk); !strings.HasPrefix(got, want) {
+		t.Errorf("Format =\n%s\nwant prefix\n%s", got, want)
+	}
+
+	// The longest description on Polymarket is ~6400 characters: it is cut
+	// so that the whole message fits Telegram's 4096.
+	mk.Description = strings.Repeat("я", 6400)
+	got := Format(mk)
+	if n := len([]rune(got)); n > 4096 || !strings.Contains(got, "…</blockquote>") {
+		t.Errorf("long description: message of %d characters; want ≤ 4096 with the description cut", n)
+	}
+	if n := strings.Count(got, "я"); n < 3800 {
+		t.Errorf("long description: %d characters kept, want most of the 4000 budget", n)
+	}
+	if got := description(strings.Repeat("a", 500), 100); len([]rune(got)) != 100+len("<blockquote expandable></blockquote>") {
+		t.Errorf("description cut to 100: %q", got)
+	}
+	if description("   ", 1000) != "" || description("text", 50) != "" {
+		t.Error("blank description or no room: want no section")
 	}
 }
 
