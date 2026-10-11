@@ -80,7 +80,7 @@ func (f *fakeStore) UpsertMarkets(_ context.Context, ms []polymarket.Market, _ t
 
 func (f *fakeStore) FilterRules(context.Context) (db.FilterRules, error) { return f.rules, nil }
 
-func (f *fakeStore) MarkAwesomeIDs(_ context.Context, ids, _, _ []string) (int64, error) {
+func (f *fakeStore) MarkAwesomeIDs(_ context.Context, ids []string, _ db.FilterRules) (int64, error) {
 	f.marked = append(f.marked, ids)
 	return int64(len(ids)), nil
 }

@@ -241,23 +241,37 @@ func Format(mk db.AwesomeMarket) string {
 	return strings.Join(sections, "\n\n")
 }
 
-// reason says why the market passed. The rule is negative (awesome unless
-// filtered out), so for most markets the honest answer is "not filtered".
+// reason says why the market passed: the allow rules it matched (they win
+// over deny rules), or that no deny rule matched.
 func reason(mk db.AwesomeMarket) string {
-	if mk.Reason == db.ReasonExcludedTag {
+	m := mk.Matches
+	deny := rules(m.DenyTags, m.DenyWords)
+	switch mk.Reason {
+	case db.ReasonDeny:
 		// Edits re-render messages: the market may have been filtered out
 		// since it was posted (e.g. its tag became a deny rule).
-		return fmt.Sprintf("⛔ Not awesome anymore\n(excluded tag «%s»)", html.EscapeString(mk.ExcludedBy))
+		return "⛔ Not awesome anymore\n(" + deny + ")"
+	case db.ReasonAllow:
+		r := "🔑 Passed: " + rules(m.AllowTags, m.AllowWords)
+		if deny != "" {
+			r += "\n(overrides " + deny + ")"
+		}
+		return r
+	default:
+		return "✅ Passed: not filtered\n(no deny rule matched)"
 	}
-	if mk.Reason == db.ReasonWords && len(mk.Words) > 0 {
-		return fmt.Sprintf("🔑 Passed: keyword %s\n(overrides excluded tag «%s»)",
-			quoteAll(mk.Words), html.EscapeString(mk.ExcludedBy))
+}
+
+// rules lists matched rules: "tag «AI», word «alien», «ufo»".
+func rules(tags, words []string) string {
+	var parts []string
+	if len(tags) > 0 {
+		parts = append(parts, "tag "+quoteAll(tags))
 	}
-	r := "✅ Passed: not filtered\n(none of the excluded tags)"
-	if len(mk.Words) > 0 {
-		r += "\nKeywords found: " + quoteAll(mk.Words)
+	if len(words) > 0 {
+		parts = append(parts, "word "+quoteAll(words))
 	}
-	return r
+	return strings.Join(parts, ", ")
 }
 
 // hashtags turns tags into Telegram hashtags ("Middle East" → #MiddleEast),

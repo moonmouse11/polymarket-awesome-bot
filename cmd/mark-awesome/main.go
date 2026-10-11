@@ -79,7 +79,7 @@ func run(ctx context.Context, log zerolog.Logger) error {
 	started := time.Now()
 
 	// No timeout: one update over millions of documents takes minutes.
-	matched, err := mongoDB.MarkAwesome(ctx, rules.DenyTags, rules.AllowWords)
+	matched, err := mongoDB.MarkAwesome(ctx, rules)
 	if err != nil {
 		return err
 	}

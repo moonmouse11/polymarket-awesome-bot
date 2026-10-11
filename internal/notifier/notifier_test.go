@@ -67,7 +67,7 @@ func (f *fakeSender) Send(_ context.Context, msg string) (int, error) {
 }
 
 func market(id, question string) db.AwesomeMarket {
-	return db.AwesomeMarket{Market: polymarket.Market{ID: id, Question: question, Slug: id}, Reason: db.ReasonTags}
+	return db.AwesomeMarket{Market: polymarket.Market{ID: id, Question: question, Slug: id}, Reason: db.ReasonDefault}
 }
 
 func newTestNotifier(q Queue, s Sender) *Notifier {
@@ -178,14 +178,17 @@ func TestFormat(t *testing.T) {
 		mk   db.AwesomeMarket
 		want string
 	}{
-		{"keyword overrides", db.AwesomeMarket{Market: base, Reason: db.ReasonWords, Words: []string{"alien", "ufo"}, ExcludedBy: "Sports"},
-			head + "🔑 Passed: keyword «alien», «ufo»\n(overrides excluded tag «Sports»)" + tail},
-		{"not filtered", db.AwesomeMarket{Market: base, Reason: db.ReasonTags},
-			head + "✅ Passed: not filtered\n(none of the excluded tags)" + tail},
-		{"filtered out since posted", db.AwesomeMarket{Market: base, Reason: db.ReasonExcludedTag, ExcludedBy: "Sports"},
-			head + "⛔ Not awesome anymore\n(excluded tag «Sports»)" + tail},
-		{"not filtered with words", db.AwesomeMarket{Market: base, Reason: db.ReasonTags, Words: []string{"ufo"}},
-			head + "✅ Passed: not filtered\n(none of the excluded tags)\nKeywords found: «ufo»" + tail},
+		{"allow word overrides a deny tag", db.AwesomeMarket{Market: base, Reason: db.ReasonAllow,
+			Matches: db.Matches{AllowWords: []string{"alien", "ufo"}, DenyTags: []string{"Sports"}}},
+			head + "🔑 Passed: word «alien», «ufo»\n(overrides tag «Sports»)" + tail},
+		{"allow tag and word", db.AwesomeMarket{Market: base, Reason: db.ReasonAllow,
+			Matches: db.Matches{AllowTags: []string{"AI"}, AllowWords: []string{"ufo"}}},
+			head + "🔑 Passed: tag «AI», word «ufo»" + tail},
+		{"not filtered", db.AwesomeMarket{Market: base, Reason: db.ReasonDefault},
+			head + "✅ Passed: not filtered\n(no deny rule matched)" + tail},
+		{"filtered out since posted", db.AwesomeMarket{Market: base, Reason: db.ReasonDeny,
+			Matches: db.Matches{DenyTags: []string{"Sports"}, DenyWords: []string{"goalscorer"}}},
+			head + "⛔ Not awesome anymore\n(tag «Sports», word «goalscorer»)" + tail},
 	}
 	for _, tt := range tests {
 		if got := Format(tt.mk); got != tt.want {

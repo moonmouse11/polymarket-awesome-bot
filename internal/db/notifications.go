@@ -15,8 +15,7 @@ import (
 type AwesomeMarket struct {
 	polymarket.Market `bson:",inline"`
 	Reason            string    `bson:"awesome_reason"`
-	Words             []string  `bson:"awesome_words,omitempty"`
-	ExcludedBy        string    `bson:"awesome_excluded_tag,omitempty"` // overridden by Words
+	Matches           Matches   `bson:"awesome_matches,omitempty"`
 	Since             time.Time `bson:"awesome_since"`
 	MessageID         int       `bson:"telegram_message_id,omitempty"`
 }

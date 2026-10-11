@@ -44,7 +44,7 @@ type Store interface {
 	MaxUpdatedAt(ctx context.Context, closed bool) (time.Time, bool, error)
 	UpsertMarkets(ctx context.Context, markets []polymarket.Market, syncedAt time.Time) (int, error)
 	FilterRules(ctx context.Context) (db.FilterRules, error)
-	MarkAwesomeIDs(ctx context.Context, ids, excluded, keywords []string) (int64, error)
+	MarkAwesomeIDs(ctx context.Context, ids []string, rules db.FilterRules) (int64, error)
 }
 
 // Reporter receives the result of every cycle (implemented by *health.Registry).
@@ -209,9 +209,7 @@ func (u *Updater) pass(ctx context.Context, closed bool) (int, error) {
 		for _, mk := range fresh {
 			ids = append(ids, mk.ID)
 		}
-		// The marking pipeline still knows two lists only: deny tags and
-		// overriding allow words. Allow tags and deny words come next.
-		if _, err := u.store.MarkAwesomeIDs(ctx, ids, rules.DenyTags, rules.AllowWords); err != nil {
+		if _, err := u.store.MarkAwesomeIDs(ctx, ids, rules); err != nil {
 			return false, err
 		}
 		total += len(fresh)

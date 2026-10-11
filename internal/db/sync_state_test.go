@@ -68,7 +68,7 @@ func TestMarkAwesomeIDs_OnlyGivenMarkets(t *testing.T) {
 	}, time.Now()); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if _, err := m.MarkAwesomeIDs(ctx, []string{"a"}, nil, nil); err != nil {
+	if _, err := m.MarkAwesomeIDs(ctx, []string{"a"}, FilterRules{}); err != nil {
 		t.Fatalf("MarkAwesomeIDs: %v", err)
 	}
 

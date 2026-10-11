@@ -24,7 +24,7 @@ func TestStats(t *testing.T) {
 	}, now); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if _, err := m.MarkAwesome(ctx, []string{"Sports"}, nil); err != nil {
+	if _, err := m.MarkAwesome(ctx, FilterRules{DenyTags: []string{"Sports"}}); err != nil {
 		t.Fatalf("MarkAwesome: %v", err)
 	}
 	if err := m.MarkNotified(ctx, "new", now, 5); err != nil {

@@ -47,8 +47,8 @@ markets-awesome: ## Recompute is_awesome for all markets from excluded_tags
 	@lvl="$$LOG_LEVEL"; fmt="$$LOG_FORMAT"; $(ENV); \
 		LOG_LEVEL="$${lvl:-$$LOG_LEVEL}" LOG_FORMAT="$${fmt:-$$LOG_FORMAT}" go run ./cmd/mark-awesome
 
-awesome-count: ## Awesome counts by reason, overriding words and excluded tags
-	@$(ENV); $(MONGOSH) --eval 'printjson({awesome: db.markets.countDocuments({is_awesome: true}), awesome_open: db.markets.countDocuments({is_awesome: true, closed: false}), not_checked: db.markets.countDocuments({is_awesome: {$$exists: false}}), by_reason: db.markets.aggregate([{$$group: {_id: "$$awesome_reason", n: {$$sum: 1}}}, {$$sort: {n: -1}}]).toArray(), override_words: db.markets.aggregate([{$$match: {awesome_reason: "words"}}, {$$unwind: "$$awesome_words"}, {$$group: {_id: "$$awesome_words", n: {$$sum: 1}}}, {$$sort: {n: -1}}]).toArray(), excluded_by: db.markets.aggregate([{$$match: {is_awesome: false}}, {$$group: {_id: "$$awesome_excluded_tag", n: {$$sum: 1}}}, {$$sort: {n: -1}}]).toArray()})'
+awesome-count: ## Awesome counts by reason, and which rules decided
+	@$(ENV); $(MONGOSH) --eval 'const by = (reason, field) => db.markets.aggregate([{$$match: {awesome_reason: reason}}, {$$unwind: "$$awesome_matches." + field}, {$$group: {_id: "$$awesome_matches." + field, n: {$$sum: 1}}}, {$$sort: {n: -1}}]).toArray(); printjson({awesome: db.markets.countDocuments({is_awesome: true}), awesome_open: db.markets.countDocuments({is_awesome: true, closed: false}), not_checked: db.markets.countDocuments({is_awesome: {$$exists: false}}), by_reason: db.markets.aggregate([{$$group: {_id: "$$awesome_reason", n: {$$sum: 1}}}, {$$sort: {n: -1}}]).toArray(), allowed_by_tag: by("allow", "allow_tags"), allowed_by_word: by("allow", "allow_words"), denied_by_tag: by("deny", "deny_tags"), denied_by_word: by("deny", "deny_words")})'
 
 awesome-sample: ## Show 10 random open awesome markets
 	@$(ENV); $(MONGOSH) --eval 'db.markets.aggregate([{$$match: {is_awesome: true, closed: false}}, {$$sample: {size: 10}}, {$$project: {question: 1, tags: 1}}]).forEach(m => print(m._id + "  " + m.question + "  [" + (m.tags || []).join(", ") + "]"))'

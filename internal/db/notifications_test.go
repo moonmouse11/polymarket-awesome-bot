@@ -31,7 +31,8 @@ func TestNotifications_QueueFollowsTransitions(t *testing.T) {
 	if err := m.EnsureMarketIndexes(ctx); err != nil {
 		t.Fatalf("EnsureMarketIndexes: %v", err)
 	}
-	excluded := []string{"Sports"}
+	rules := FilterRules{DenyTags: []string{"Sports"}}
+	withZombie := FilterRules{DenyTags: []string{"Sports"}, AllowWords: []string{"zombie"}}
 
 	// Already awesome before notifications existed (no awesome_since):
 	// must not be announced.
@@ -51,7 +52,7 @@ func TestNotifications_QueueFollowsTransitions(t *testing.T) {
 	}, time.Now()); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if _, err := m.MarkAwesome(ctx, excluded, nil); err != nil {
+	if _, err := m.MarkAwesome(ctx, rules); err != nil {
 		t.Fatalf("MarkAwesome: %v", err)
 	}
 	if got := pendingIDs(t, m); len(got) != 1 || got[0] != "new" {
@@ -59,11 +60,11 @@ func TestNotifications_QueueFollowsTransitions(t *testing.T) {
 	}
 
 	// A recompute without changes keeps the queue as is.
-	if _, err := m.MarkAwesome(ctx, excluded, nil); err != nil {
+	if _, err := m.MarkAwesome(ctx, rules); err != nil {
 		t.Fatalf("MarkAwesome again: %v", err)
 	}
 	// A new keyword turns "later" awesome: it joins the queue.
-	if _, err := m.MarkAwesome(ctx, excluded, []string{"zombie"}); err != nil {
+	if _, err := m.MarkAwesome(ctx, withZombie); err != nil {
 		t.Fatalf("MarkAwesome with keyword: %v", err)
 	}
 	if got := pendingIDs(t, m); len(got) != 2 || got[0] != "later" || got[1] != "new" {
@@ -83,10 +84,10 @@ func TestNotifications_QueueFollowsTransitions(t *testing.T) {
 	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "new", Question: "UFO?", Tags: []string{"Science"}}}, time.Now()); err != nil {
 		t.Fatalf("upsert new: %v", err)
 	}
-	if _, err := m.MarkAwesome(ctx, []string{"Sports", "Science"}, []string{"zombie"}); err != nil { // "new" is off
+	if _, err := m.MarkAwesome(ctx, FilterRules{DenyTags: []string{"Sports", "Science"}, AllowWords: []string{"zombie"}}); err != nil { // "new" is off
 		t.Fatalf("MarkAwesome: %v", err)
 	}
-	if _, err := m.MarkAwesome(ctx, excluded, []string{"zombie"}); err != nil { // and on again
+	if _, err := m.MarkAwesome(ctx, withZombie); err != nil { // and on again
 		t.Fatalf("MarkAwesome: %v", err)
 	}
 	if got := pendingIDs(t, m); len(got) != 1 || got[0] != "later" {
@@ -97,7 +98,7 @@ func TestNotifications_QueueFollowsTransitions(t *testing.T) {
 	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "later", Question: "Zombies?", Tags: []string{"Sports"}, Closed: true}}, time.Now()); err != nil {
 		t.Fatalf("upsert later closed: %v", err)
 	}
-	if _, err := m.MarkAwesomeIDs(ctx, []string{"later"}, excluded, []string{"zombie"}); err != nil {
+	if _, err := m.MarkAwesomeIDs(ctx, []string{"later"}, withZombie); err != nil {
 		t.Fatalf("MarkAwesomeIDs: %v", err)
 	}
 	if got := pendingIDs(t, m); len(got) != 0 {

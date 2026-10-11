@@ -31,8 +31,8 @@ New awesome markets are posted to the Telegram channel **[Polymarket Search](htt
 | Feature | State |
 |---|---|
 | Full load of all markets (open and closed) into MongoDB | ✅ done, manual command `make markets-load` |
-| Awesome marking by tags (`make markets-awesome`) | ✅ draft rule: everything except excluded tags |
-| Filter rules: allow/deny lists of tags and words in MongoDB (`filter_rules`), edited with `make`, with history | ✅ storage done; allow tags and deny words not applied yet |
+| Awesome marking by filter rules (`make markets-awesome`) | ✅ allow/deny tags and words; awesome unless denied |
+| Filter rules: allow/deny lists of tags and words in MongoDB (`filter_rules`), edited with `make`, with history | ✅ done |
 | Health check (`/health`), graceful shutdown | ✅ done |
 | Keyword analyzer (`KeywordAnalyzer`) | 🚧 code and tests exist, not wired into the bot yet |
 | AI analyzer Jev | 🚧 stub, waiting for API early access |
@@ -46,8 +46,8 @@ New awesome markets are posted to the Telegram channel **[Polymarket Search](htt
 
 1. **Initial load.** All markets — open first, then closed — are fetched page by page from the Gamma API and stored in MongoDB. Runs manually: `make markets-load`.
 2. **Updates.** Every `POLL_INTERVAL` (5 minutes by default) the bot fetches markets updated since the last run (newest `updatedAt` first, open and closed), writes them and recomputes their awesome flag. Progress is kept in the `sync_state` collection, so after downtime the bot catches up from where it stopped.
-3. **Awesome markets.** A market is awesome unless it has a deny tag from the `filter_rules` collection (sports, auto-generated series, elections, macro…); an allow word found in its text overrides that. The rule is deliberately broad for now; `make markets-awesome` recomputes the flag for all markets.
-4. **Notifications.** When an open market becomes awesome (a new market, or an old one after a filter rule edit), it is queued in MongoDB (`notify_pending`) and posted to the Telegram channel, at most ~20 messages a minute. A message shows the odds, volume, end date, why the market passed (✅ not filtered — none of the excluded tags, or 🔑 a keyword that overrides an excluded tag), its tags as hashtags and a link to the market. Each market is announced once (`notified_at`); the message id is stored (`telegram_message_id`), so posted messages can be re-rendered from current data and edited silently (`edit_pending`, `make notify-reformat`); new markets are sent before edits; markets that closed or stopped being awesome before sending are dropped. Markets that were awesome before notifications existed are not announced.
+3. **Awesome markets.** Filter rules from the `filter_rules` collection decide: a market that matches an allow tag or word is awesome; otherwise one that matches a deny tag or word is not; a market that matches nothing is awesome, so nothing interesting is missed — noise is cut with deny rules. Every matched rule is stored in `awesome_matches`. The rule is deliberately broad for now; `make markets-awesome` recomputes the flag for all markets.
+4. **Notifications.** When an open market becomes awesome (a new market, or an old one after a filter rule edit), it is queued in MongoDB (`notify_pending`) and posted to the Telegram channel, at most ~20 messages a minute. A message shows the odds, volume, end date, why the market passed (✅ not filtered — no deny rule matched, or 🔑 the allow tags/words it matched, with the deny rules they override), its tags as hashtags and a link to the market. Each market is announced once (`notified_at`); the message id is stored (`telegram_message_id`), so posted messages can be re-rendered from current data and edited silently (`edit_pending`, `make notify-reformat`); new markets are sent before edits; markets that closed or stopped being awesome before sending are dropped. Markets that were awesome before notifications existed are not announced.
 5. **Admin and alerts.** Admins (`TELEGRAM_ADMIN_IDS`) can ask the bot in a private chat for `/status` and `/health_check`. Every minute the bot checks MongoDB and Telegram and evaluates alert rules; an admin gets one message when a problem starts (repeated every 6 h while it lasts) and one when it is resolved. Health data is kept in memory and counted since the bot started.
 6. **Detectors** *(planned).* Only for awesome markets that are still open: sharp price jumps, edits of the question or description, closing and resolution, volume spikes.
 
@@ -158,7 +158,7 @@ make rule-add kind=word action=allow value="elon musk"
 make rule-remove kind=tag value="Games"                # from whichever list holds it
 ```
 
-Allow rules win over deny rules; a market that matches nothing is awesome. For now the marking applies deny tags and allow words; allow tags and deny words are stored but not applied yet.
+Allow rules win over deny rules; a market that matches nothing is awesome. A word matches at the start of a word, in any case, in the question, event title, description and tags: `alien` finds "Aliens" but not "Valiente"; a phrase like `elon musk` works too.
 
 The bot reads the rules every cycle, so a change applies to markets updated from then on; `make markets-awesome` recomputes all markets (and queues the ones that became awesome for the channel). With no deny rules every market would be awesome, so the bot pauses market updates (the admins get the "Market updates are failing" alert) and `make markets-awesome` refuses to run.
 
