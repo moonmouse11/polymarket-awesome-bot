@@ -10,8 +10,9 @@ import (
 
 // Stats is what the /status admin command shows. Every count uses an index.
 type Stats struct {
-	PendingSends int64
-	PendingEdits int64
+	PendingSends   int64
+	PendingEdits   int64
+	PendingDeletes int64
 
 	Awesome     int64
 	AwesomeOpen int64
@@ -46,6 +47,9 @@ func (m *MongoDB) Stats(ctx context.Context, since time.Time) (Stats, error) {
 	var err error
 	if st.PendingSends, st.PendingEdits, err = m.QueueSizes(ctx); err != nil {
 		return st, err
+	}
+	if st.PendingDeletes, err = m.db.Collection(marketsCollection).CountDocuments(ctx, bson.D{{Key: fieldDeletePending, Value: true}}); err != nil {
+		return st, fmt.Errorf("count pending deletes: %w", err)
 	}
 	if st.Awesome, st.AwesomeOpen, err = m.CountAwesome(ctx); err != nil {
 		return st, err

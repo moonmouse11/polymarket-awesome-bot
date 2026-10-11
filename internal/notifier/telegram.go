@@ -100,6 +100,29 @@ func (t *Telegram) Edit(ctx context.Context, messageID int, html string) error {
 	return err
 }
 
+// Delete deletes channel messages, up to 100 per call. Telegram skips
+// messages that no longer exist; it reports a refusal (e.g. a message older
+// than 48 h) as a 400 for the whole call.
+func (t *Telegram) Delete(ctx context.Context, messageIDs []int) error {
+	ok, err := t.bot.DeleteMessages(ctx, &bot.DeleteMessagesParams{ChatID: t.chatID, MessageIDs: messageIDs})
+	if err == nil && !ok {
+		return fmt.Errorf("%w: deleteMessages returned false", bot.ErrorBadRequest)
+	}
+	return err
+}
+
+// DeleteOne deletes one channel message; one already gone counts as deleted.
+func (t *Telegram) DeleteOne(ctx context.Context, messageID int) error {
+	ok, err := t.bot.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: t.chatID, MessageID: messageID})
+	if err != nil && strings.Contains(err.Error(), "message to delete not found") {
+		return nil
+	}
+	if err == nil && !ok {
+		return fmt.Errorf("%w: deleteMessage returned false", bot.ErrorBadRequest)
+	}
+	return err
+}
+
 // SendTo posts an HTML message to a private chat (alerts and command replies).
 func (t *Telegram) SendTo(ctx context.Context, chatID int64, html string) error {
 	noPreview := true

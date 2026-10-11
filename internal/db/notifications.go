@@ -87,3 +87,68 @@ func (m *MongoDB) MarkEdited(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// PendingDelete is a channel message waiting to be deleted.
+type PendingDelete struct {
+	ID        string `bson:"_id"`
+	MessageID int    `bson:"telegram_message_id"`
+}
+
+// PendingDeletes returns up to limit messages of markets that are no longer
+// awesome, oldest message first.
+func (m *MongoDB) PendingDeletes(ctx context.Context, limit int64) ([]PendingDelete, error) {
+	cur, err := m.db.Collection(marketsCollection).Find(ctx,
+		bson.D{{Key: fieldDeletePending, Value: true}},
+		options.Find().SetSort(bson.D{{Key: fieldMessageID, Value: 1}}).SetLimit(limit).
+			SetProjection(bson.D{{Key: fieldMessageID, Value: 1}}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("find pending deletes: %w", err)
+	}
+	var out []PendingDelete
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("decode pending deletes: %w", err)
+	}
+	return out, nil
+}
+
+// MarkDeleted forgets the deleted messages: the markets count as never
+// announced, so one that becomes awesome again is posted anew with a new
+// message id.
+func (m *MongoDB) MarkDeleted(ctx context.Context, ids []string, at time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := m.db.Collection(marketsCollection).UpdateMany(ctx,
+		bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}},
+		bson.D{
+			{Key: "$set", Value: bson.D{{Key: fieldDeletedAt, Value: at.UTC()}}},
+			{Key: "$unset", Value: bson.D{
+				{Key: fieldDeletePending, Value: ""},
+				{Key: fieldEditPending, Value: ""},
+				{Key: fieldMessageID, Value: ""},
+				{Key: fieldNotifiedAt, Value: ""},
+			}},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("mark %d messages deleted: %w", len(ids), err)
+	}
+	return nil
+}
+
+// MarkDeleteFailed takes the market out of the delete queue, keeping its
+// message: Telegram refused to delete it (e.g. too old).
+func (m *MongoDB) MarkDeleteFailed(ctx context.Context, id, reason string) error {
+	_, err := m.db.Collection(marketsCollection).UpdateOne(ctx,
+		bson.D{{Key: "_id", Value: id}},
+		bson.D{
+			{Key: "$set", Value: bson.D{{Key: "telegram_delete_error", Value: reason}}},
+			{Key: "$unset", Value: bson.D{{Key: fieldDeletePending, Value: ""}}},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("mark market %s delete failed: %w", id, err)
+	}
+	return nil
+}

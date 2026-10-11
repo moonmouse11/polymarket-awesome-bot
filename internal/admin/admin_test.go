@@ -67,12 +67,12 @@ func TestNum(t *testing.T) {
 func TestStatus(t *testing.T) {
 	reg := health.NewRegistry()
 	reg.Cycle(1200, 78*time.Second, false, nil)
-	store := &fakeStore{stats: db.Stats{PendingSends: 2, PendingEdits: 6412, Awesome: 133372, AwesomeOpen: 8136,
+	store := &fakeStore{stats: db.Stats{PendingDeletes: 589, PendingSends: 2, PendingEdits: 6412, Awesome: 133372, AwesomeOpen: 8136,
 		Updated: 151203, Created: 25120, BecameAwesome: 341, Announced: 338}}
 	got := New(nil, store, reg, zerolog.Nop()).Answer(context.Background(), "/status")
 
 	for _, want := range []string{
-		"To send: 2 · To edit: 6 412",
+		"To delete: 589 · To send: 2 · To edit: 6 412",
 		"Total: 133 372 · Open: 8 136",
 		"Markets updated: 151 203\nNew markets: 25 120\nBecame awesome: 341 · Announced: 338",
 		"Updates from API: 1 200 in 1 cycles (since start",

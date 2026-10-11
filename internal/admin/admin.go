@@ -151,7 +151,8 @@ func (c *Commands) status(ctx context.Context) string {
 	if err != nil {
 		fmt.Fprintf(&b, "🔴 MongoDB: %s\n\n", short(err))
 	} else {
-		fmt.Fprintf(&b, "<b>Queue</b>\nTo send: %s · To edit: %s\n\n", num(st.PendingSends), num(st.PendingEdits))
+		fmt.Fprintf(&b, "<b>Queue</b>\nTo delete: %s · To send: %s · To edit: %s\n\n",
+			num(st.PendingDeletes), num(st.PendingSends), num(st.PendingEdits))
 		fmt.Fprintf(&b, "<b>Awesome markets</b>\nTotal: %s · Open: %s\n\n", num(st.Awesome), num(st.AwesomeOpen))
 		fmt.Fprintf(&b, "<b>Last 24 h</b>\nMarkets updated: %s\nNew markets: %s\nBecame awesome: %s · Announced: %s\n",
 			num(st.Updated), num(st.Created), num(st.BecameAwesome), num(st.Announced))

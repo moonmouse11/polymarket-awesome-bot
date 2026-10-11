@@ -26,6 +26,8 @@ const (
 	idleWait = 30 * time.Second
 	// batchSize markets are read from the queue at a time.
 	batchSize = 20
+	// deleteBatch messages are deleted in one call (Telegram's maximum).
+	deleteBatch = 100
 )
 
 // Queue is MongoDB (implemented by *db.MongoDB).
@@ -34,12 +36,17 @@ type Queue interface {
 	MarkNotified(ctx context.Context, id string, at time.Time, messageID int) error
 	PendingEdits(ctx context.Context, limit int64) ([]db.AwesomeMarket, error)
 	MarkEdited(ctx context.Context, id string) error
+	PendingDeletes(ctx context.Context, limit int64) ([]db.PendingDelete, error)
+	MarkDeleted(ctx context.Context, ids []string, at time.Time) error
+	MarkDeleteFailed(ctx context.Context, id, reason string) error
 }
 
-// Sender posts and edits messages (implemented by *Telegram).
+// Sender posts, edits and deletes messages (implemented by *Telegram).
 type Sender interface {
 	Send(ctx context.Context, html string) (int, error)
 	Edit(ctx context.Context, messageID int, html string) error
+	Delete(ctx context.Context, messageIDs []int) error
+	DeleteOne(ctx context.Context, messageID int) error
 }
 
 // Reporter receives the outcome of Telegram calls (implemented by *health.Registry).
@@ -94,17 +101,15 @@ func (n *Notifier) observe(err error) {
 	}
 }
 
-// Run sends notifications until ctx is cancelled. New markets go first;
-// edits are made only when nothing waits to be sent. Failures are logged and
-// retried later; they never stop the bot.
+// Run works the queues until ctx is cancelled, in priority order: delete the
+// messages of markets that are no longer awesome, then announce new markets,
+// then edit posted messages. Failures are logged and retried later; they
+// never stop the bot.
 func (n *Notifier) Run(ctx context.Context) error {
 	n.log.Info().Msg("Notifier started")
 	for {
 		wait := n.idleWait
-		done, err := n.sendBatch(ctx)
-		if err == nil && done == 0 {
-			done, err = n.editBatch(ctx)
-		}
+		done, err := n.step(ctx)
 		switch {
 		case ctx.Err() != nil:
 		case err != nil:
@@ -123,6 +128,16 @@ func (n *Notifier) Run(ctx context.Context) error {
 		case <-time.After(wait):
 		}
 	}
+}
+
+// step works the first queue that has something: deletes, sends, edits.
+func (n *Notifier) step(ctx context.Context) (int, error) {
+	for _, batch := range []func(context.Context) (int, error){n.deleteBatch, n.sendBatch, n.editBatch} {
+		if done, err := batch(ctx); err != nil || done > 0 {
+			return done, err
+		}
+	}
+	return 0, nil
 }
 
 // pace waits so that Telegram calls are at least sendEvery apart, across
@@ -168,6 +183,63 @@ func (n *Notifier) sendBatch(ctx context.Context) (int, error) {
 		n.log.Info().Str("market", mk.ID).Str("question", mk.Question).Msg("Awesome market announced")
 	}
 	return sent, nil
+}
+
+// deleteBatch deletes up to deleteBatch queued messages in one call. If
+// Telegram rejects the call, the messages are deleted one by one to find the
+// ones it refuses (e.g. older than 48 h); those stay in the channel.
+func (n *Notifier) deleteBatch(ctx context.Context) (int, error) {
+	pending, err := n.queue.PendingDeletes(ctx, deleteBatch)
+	if err != nil || len(pending) == 0 {
+		return 0, err
+	}
+	ids := make([]string, len(pending))
+	msgs := make([]int, len(pending))
+	for i, p := range pending {
+		ids[i], msgs[i] = p.ID, p.MessageID
+	}
+
+	if err := n.pace(ctx); err != nil {
+		return 0, err
+	}
+	err = n.sender.Delete(ctx, msgs)
+	n.observe(err)
+	switch {
+	case err == nil:
+		if err := n.queue.MarkDeleted(ctx, ids, time.Now()); err != nil {
+			return 0, err
+		}
+		n.log.Info().Int("deleted", len(ids)).Msg("Channel messages deleted")
+		return len(ids), nil
+	case !isBadMessage(err):
+		return 0, fmt.Errorf("delete %d messages: %w", len(msgs), err)
+	}
+
+	n.log.Warn().Err(err).Int("messages", len(msgs)).Msg("Telegram rejected a batch delete; deleting one by one")
+	deleted := 0
+	for _, p := range pending {
+		if err := n.pace(ctx); err != nil {
+			return deleted, err
+		}
+		err := n.sender.DeleteOne(ctx, p.MessageID)
+		n.observe(err)
+		switch {
+		case err == nil:
+			if err := n.queue.MarkDeleted(ctx, []string{p.ID}, time.Now()); err != nil {
+				return deleted, err
+			}
+			deleted++
+		case isBadMessage(err):
+			n.log.Error().Err(err).Str("market", p.ID).Int("message", p.MessageID).Msg("Telegram refused to delete the message; it stays in the channel")
+			if err := n.queue.MarkDeleteFailed(ctx, p.ID, err.Error()); err != nil {
+				return deleted, err
+			}
+		default:
+			return deleted, fmt.Errorf("delete message %d (market %s): %w", p.MessageID, p.ID, err)
+		}
+	}
+	// Refused messages count too: they left the queue.
+	return len(pending), nil
 }
 
 // editBatch re-renders up to batchSize posted messages from the current

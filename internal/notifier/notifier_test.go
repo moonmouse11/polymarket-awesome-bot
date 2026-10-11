@@ -23,6 +23,23 @@ type fakeQueue struct {
 	msgIDs   []int
 	edits    []db.AwesomeMarket
 	edited   []string
+	deletes  []db.PendingDelete
+	deleted  []string
+	failed   []string
+}
+
+func (f *fakeQueue) PendingDeletes(context.Context, int64) ([]db.PendingDelete, error) {
+	return f.deletes, nil
+}
+
+func (f *fakeQueue) MarkDeleted(_ context.Context, ids []string, _ time.Time) error {
+	f.deleted = append(f.deleted, ids...)
+	return nil
+}
+
+func (f *fakeQueue) MarkDeleteFailed(_ context.Context, id, _ string) error {
+	f.failed = append(f.failed, id)
+	return nil
 }
 
 func (f *fakeQueue) PendingEdits(context.Context, int64) ([]db.AwesomeMarket, error) {
@@ -49,6 +66,21 @@ type fakeSender struct {
 	sent   []string
 	edits  []int // edited message ids
 	editEr error
+
+	batches   [][]int       // deleteMessages calls
+	batchErr  error         // error of every deleteMessages call
+	singles   []int         // deleteMessage calls
+	singleErr map[int]error // error of deleteMessage per message id
+}
+
+func (f *fakeSender) Delete(_ context.Context, ids []int) error {
+	f.batches = append(f.batches, ids)
+	return f.batchErr
+}
+
+func (f *fakeSender) DeleteOne(_ context.Context, id int) error {
+	f.singles = append(f.singles, id)
+	return f.singleErr[id]
 }
 
 func (f *fakeSender) Edit(_ context.Context, messageID int, _ string) error {
@@ -111,6 +143,70 @@ func TestSendBatch_SkipsRejectedMessage(t *testing.T) {
 	}
 	if strings.Join(q.notified, ",") != "1,2" {
 		t.Errorf("notified = %v, want [1 2]: a rejected message must not block the queue", q.notified)
+	}
+}
+
+func TestDeleteBatch_OneCallForAll(t *testing.T) {
+	q := &fakeQueue{deletes: []db.PendingDelete{{ID: "1", MessageID: 11}, {ID: "2", MessageID: 12}}}
+	s := &fakeSender{}
+	done, err := newTestNotifier(q, s).deleteBatch(context.Background())
+	if err != nil || done != 2 {
+		t.Fatalf("deleteBatch = %d, %v; want 2, nil", done, err)
+	}
+	if len(s.batches) != 1 || fmt.Sprint(s.batches[0]) != "[11 12]" || len(s.singles) != 0 {
+		t.Errorf("batches %v, singles %v; want one call with [11 12]", s.batches, s.singles)
+	}
+	if strings.Join(q.deleted, ",") != "1,2" {
+		t.Errorf("deleted = %v, want [1 2]", q.deleted)
+	}
+}
+
+func TestDeleteBatch_RejectedBatchFallsBackToSingles(t *testing.T) {
+	q := &fakeQueue{deletes: []db.PendingDelete{{ID: "old", MessageID: 11}, {ID: "new", MessageID: 12}}}
+	tooOld := fmt.Errorf("%w, message can't be deleted", bot.ErrorBadRequest)
+	s := &fakeSender{batchErr: tooOld, singleErr: map[int]error{11: tooOld}}
+	done, err := newTestNotifier(q, s).deleteBatch(context.Background())
+	if err != nil || done != 2 {
+		t.Fatalf("deleteBatch = %d, %v; want 2 (both left the queue), nil", done, err)
+	}
+	if strings.Join(q.deleted, ",") != "new" || strings.Join(q.failed, ",") != "old" {
+		t.Errorf("deleted %v, failed %v; want [new], [old]", q.deleted, q.failed)
+	}
+}
+
+func TestDeleteBatch_TelegramDownKeepsQueue(t *testing.T) {
+	q := &fakeQueue{deletes: []db.PendingDelete{{ID: "1", MessageID: 11}}}
+	s := &fakeSender{batchErr: errors.New("network down")}
+	if _, err := newTestNotifier(q, s).deleteBatch(context.Background()); err == nil || len(q.deleted)+len(q.failed) != 0 {
+		t.Errorf("err = %v, deleted %v, failed %v; want an error and the queue untouched", err, q.deleted, q.failed)
+	}
+}
+
+func TestStep_DeletesThenSendsThenEdits(t *testing.T) {
+	m := market("2", "B?")
+	m.MessageID = 21
+	q := &fakeQueue{
+		deletes: []db.PendingDelete{{ID: "1", MessageID: 11}},
+		pending: []db.AwesomeMarket{market("3", "C?")},
+		edits:   []db.AwesomeMarket{m},
+	}
+	s := &fakeSender{}
+	n := newTestNotifier(q, s)
+
+	if _, err := n.step(context.Background()); err != nil {
+		t.Fatalf("step: %v", err)
+	}
+	if len(s.batches) != 1 || len(s.sent) != 0 || len(s.edits) != 0 {
+		t.Errorf("first step: deletes %v, sends %d, edits %v; want only the delete", s.batches, len(s.sent), s.edits)
+	}
+
+	q.deletes = nil
+	if _, err := n.step(context.Background()); err != nil || len(s.sent) != 1 || len(s.edits) != 0 {
+		t.Errorf("second step: err %v, sends %d, edits %v; want the send", err, len(s.sent), s.edits)
+	}
+	q.pending = nil
+	if _, err := n.step(context.Background()); err != nil || len(s.edits) != 1 {
+		t.Errorf("third step: err %v, edits %v; want the edit", err, s.edits)
 	}
 }
 
@@ -270,5 +366,41 @@ func TestTelegram_ChannelNameAndSend(t *testing.T) {
 	srv.Close()
 	if err := tg.Check(ctx); err == nil || IsConfigError(err) {
 		t.Errorf("Check with Telegram down = %v, want a non-config error", err)
+	}
+}
+
+func TestTelegram_Delete(t *testing.T) {
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseMultipartForm(1 << 20)
+		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		calls = append(calls, method+" "+r.FormValue("message_ids")+r.FormValue("message_id"))
+		switch r.FormValue("message_id") {
+		case "404":
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message to delete not found"}`))
+		case "48":
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message can't be deleted"}`))
+		default:
+			_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+		}
+	}))
+	defer srv.Close()
+	tg, err := NewTelegram("1:token", "@c", bot.WithServerURL(srv.URL))
+	if err != nil {
+		t.Fatalf("NewTelegram: %v", err)
+	}
+	ctx := context.Background()
+
+	if err := tg.Delete(ctx, []int{11, 12}); err != nil {
+		t.Errorf("Delete: %v", err)
+	}
+	if err := tg.DeleteOne(ctx, 404); err != nil {
+		t.Errorf("DeleteOne of a missing message = %v, want nil (already gone)", err)
+	}
+	if err := tg.DeleteOne(ctx, 48); err == nil || !isBadMessage(err) {
+		t.Errorf("DeleteOne refused = %v, want a 400", err)
+	}
+	if len(calls) != 3 || calls[0] != "deleteMessages [11,12]" || calls[1] != "deleteMessage 404" {
+		t.Errorf("calls = %q", calls)
 	}
 }

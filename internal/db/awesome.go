@@ -22,6 +22,8 @@ const (
 	fieldNotifiedAt       = "notified_at"         // when the notification was sent; never cleared, so no repeats
 	fieldMessageID        = "telegram_message_id" // channel message about the market, to edit it later
 	fieldEditPending      = "edit_pending"        // true: the channel message must be re-rendered and edited
+	fieldDeletePending    = "delete_pending"      // true: the market stopped being awesome, its message must be deleted
+	fieldDeletedAt        = "telegram_deleted_at" // when its last channel message was deleted
 )
 
 // Values of awesome_reason.
@@ -62,7 +64,11 @@ func wordPattern(word string) string {
 }
 
 // MarkAwesome recomputes the awesome fields for every market in one
-// server-side update:
+// server-side update. It is run after the rules change, so it also queues
+// the channel messages of markets that are no longer awesome for deletion
+// (delete_pending); MarkAwesomeIDs, run on every update, does not.
+//
+// The decision:
 //   - an allow tag or allow word matched → awesome (allow wins);
 //   - otherwise a deny tag or deny word matched → not awesome;
 //   - otherwise → awesome.
@@ -71,7 +77,7 @@ func wordPattern(word string) string {
 // question, event_title, description and tags. It returns how many markets
 // were matched.
 func (m *MongoDB) MarkAwesome(ctx context.Context, rules FilterRules) (int64, error) {
-	return m.markAwesome(ctx, bson.D{}, rules)
+	return m.markAwesome(ctx, bson.D{}, rules, true)
 }
 
 // MarkAwesomeIDs is MarkAwesome for the given market ids only.
@@ -79,10 +85,10 @@ func (m *MongoDB) MarkAwesomeIDs(ctx context.Context, ids []string, rules Filter
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	return m.markAwesome(ctx, bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}, rules)
+	return m.markAwesome(ctx, bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}, rules, false)
 }
 
-func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, rules FilterRules) (int64, error) {
+func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, rules FilterRules, deletePosted bool) (int64, error) {
 	ifNull := func(field string, def interface{}) bson.D {
 		return bson.D{{Key: "$ifNull", Value: bson.A{field, def}}}
 	}
@@ -205,6 +211,18 @@ func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, rules FilterRu
 				}},
 				// Otherwise keep the current state (a missing field stays missing).
 				{Key: "default", Value: "$" + fieldNotifyPending},
+			}}}},
+			// A posted market that is not awesome: delete its message (full
+			// recompute only); awesome again before that: keep the message.
+			{Key: fieldDeletePending, Value: bson.D{{Key: "$switch", Value: bson.D{
+				{Key: "branches", Value: bson.A{
+					bson.D{{Key: "case", Value: isAwesome}, {Key: "then", Value: "$$REMOVE"}},
+					bson.D{{Key: "case", Value: bson.D{{Key: "$and", Value: bson.A{
+						deletePosted,
+						bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$type", Value: "$" + fieldMessageID}}, "missing"}}},
+					}}}}, {Key: "then", Value: true}},
+				}},
+				{Key: "default", Value: "$" + fieldDeletePending},
 			}}}},
 		}}},
 		{{Key: "$unset", Value: append(bson.A{tmpText, tmpAllowTags, tmpDenyTags, tmpAllowWords, tmpDenyWords}, legacyAwesomeFields...)}},

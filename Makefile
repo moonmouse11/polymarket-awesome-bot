@@ -1,4 +1,4 @@
-.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state rules rules-history rule-add rule-remove lint fmt test check notify-queue notify-backfill notify-reformat notify-edits-stop
+.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state rules rules-history rule-add rule-remove lint fmt test check notify-queue notify-backfill notify-reformat notify-edits-stop notify-deletes-stop
 
 .DEFAULT_GOAL := help
 
@@ -43,7 +43,7 @@ markets-show: ## Show one full market document: make markets-show ID=559651
 	@test -n "$(ID)" || (echo "usage: make markets-show ID=559651" && exit 1)
 	@$(ENV); docker compose exec -T -e ID='$(ID)' mongodb mongosh --quiet "$$MONGO_URI" --eval 'printjson(db.markets.findOne({_id: process.env.ID}))'
 
-markets-awesome: ## Recompute is_awesome for all markets from excluded_tags
+markets-awesome: ## Recompute awesome for all markets from filter_rules; queues deletion of posted markets no longer awesome
 	@lvl="$$LOG_LEVEL"; fmt="$$LOG_FORMAT"; $(ENV); \
 		LOG_LEVEL="$${lvl:-$$LOG_LEVEL}" LOG_FORMAT="$${fmt:-$$LOG_FORMAT}" go run ./cmd/mark-awesome
 
@@ -54,7 +54,7 @@ awesome-sample: ## Show 10 random open awesome markets
 	@$(ENV); $(MONGOSH) --eval 'db.markets.aggregate([{$$match: {is_awesome: true, closed: false}}, {$$sample: {size: 10}}, {$$project: {question: 1, tags: 1}}]).forEach(m => print(m._id + "  " + m.question + "  [" + (m.tags || []).join(", ") + "]"))'
 
 notify-queue: ## Markets waiting for a Telegram notification, and the last sent
-	@$(ENV); $(MONGOSH) --eval 'print("pending:", db.markets.countDocuments({notify_pending: true}), "edits pending:", db.markets.countDocuments({edit_pending: true})); db.markets.find({notified_at: {$$exists: true}}, {question: 1, notified_at: 1}).sort({notified_at: -1}).limit(5).forEach(m => print(m.notified_at.toISOString() + "  " + m.question))'
+	@$(ENV); $(MONGOSH) --eval 'print("deletes pending:", db.markets.countDocuments({delete_pending: true}), "pending:", db.markets.countDocuments({notify_pending: true}), "edits pending:", db.markets.countDocuments({edit_pending: true}), "delete refused:", db.markets.countDocuments({telegram_delete_error: {$$exists: true}})); db.markets.find({notified_at: {$$exists: true}}, {question: 1, notified_at: 1}).sort({notified_at: -1}).limit(5).forEach(m => print(m.notified_at.toISOString() + "  " + m.question))'
 
 notify-backfill: ## Queue all open awesome markets that were never announced (~20 messages/min)
 	@$(ENV); $(MONGOSH) --eval 'const r = db.markets.updateMany({is_awesome: true, closed: false, notified_at: {$$exists: false}}, {$$set: {notify_pending: true}}); print("queued:", r.modifiedCount)'
@@ -64,6 +64,9 @@ notify-reformat: ## Re-render and edit all posted channel messages (after a form
 
 notify-edits-stop: ## Cancel all queued message edits (already edited messages stay as they are)
 	@$(ENV); $(MONGOSH) --eval 'const r = db.markets.updateMany({edit_pending: true}, {$$unset: {edit_pending: ""}}); print("cancelled edits:", r.modifiedCount)'
+
+notify-deletes-stop: ## Cancel all queued message deletions (messages stay in the channel)
+	@$(ENV); $(MONGOSH) --eval 'const r = db.markets.updateMany({delete_pending: true}, {$$unset: {delete_pending: ""}}); print("cancelled deletions:", r.modifiedCount)'
 
 sync-state: ## Show polling progress (watermark, last successful cycle)
 	@$(ENV); $(MONGOSH) --eval 'printjson(db.sync_state.find().toArray())'

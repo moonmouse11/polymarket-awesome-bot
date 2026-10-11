@@ -36,6 +36,13 @@ func (m *MongoDB) EnsureMarketIndexes(ctx context.Context) error {
 			Keys:    bson.D{{Key: fieldMessageID, Value: 1}},
 			Options: options.Index().SetPartialFilterExpression(bson.D{{Key: fieldEditPending, Value: true}}),
 		},
+		// Delete queue: tiny as well. Named: telegram_message_id already has
+		// the edit queue index.
+		{
+			Keys: bson.D{{Key: fieldMessageID, Value: 1}},
+			Options: options.Index().SetName("delete_queue").
+				SetPartialFilterExpression(bson.D{{Key: fieldDeletePending, Value: true}}),
+		},
 		// Daily counts in /status. Sparse: only markets that have the field.
 		// Named, because awesome_since already has the queue index above.
 		{Keys: bson.D{{Key: "created_at", Value: 1}}},
