@@ -1,4 +1,4 @@
-.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state rules rules-history rule-add rule-remove lint fmt test check notify-queue notify-backfill notify-reformat notify-edits-stop notify-deletes-stop
+.PHONY: help up down logs build clean markets-load markets-count markets-sample markets-find markets-show markets-awesome awesome-count awesome-sample sync-state rules rules-history rule-add rule-remove lint fmt test check notify-queue notify-backfill notify-reformat notify-edits-stop notify-deletes-stop notify-restore
 
 .DEFAULT_GOAL := help
 
@@ -67,6 +67,10 @@ notify-edits-stop: ## Cancel all queued message edits (already edited messages s
 
 notify-deletes-stop: ## Cancel all queued message deletions (messages stay in the channel)
 	@$(ENV); $(MONGOSH) --eval 'const r = db.markets.updateMany({delete_pending: true}, {$$unset: {delete_pending: ""}}); print("cancelled deletions:", r.modifiedCount)'
+
+notify-restore: ## After a lost DB: mark markets posted per a channel export: make notify-restore file=result.json
+	@test -n "$(file)" || (echo "usage: make notify-restore file=result.json" && exit 1)
+	@$(ENV); go run ./cmd/restore-posts "$(file)"
 
 sync-state: ## Show polling progress (watermark, last successful cycle)
 	@$(ENV); $(MONGOSH) --eval 'printjson(db.sync_state.find().toArray())'

@@ -250,3 +250,45 @@ func TestNotifications_DeleteQueueAndRepost(t *testing.T) {
 		t.Errorf("goal: message %d, deleted_at %v; want 99 and the time of the delete", got.MessageID, got.DeletedAt)
 	}
 }
+
+func TestRestoreNotified(t *testing.T) {
+	m := newTestMongo(t)
+	ctx := context.Background()
+	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "1", Slug: "ufo", Question: "UFO?"}}, time.Now()); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if _, err := m.MarkAwesome(ctx, FilterRules{DenyTags: []string{"Sports"}}); err != nil {
+		t.Fatalf("MarkAwesome: %v", err)
+	}
+	if got := pendingIDs(t, m); len(got) != 1 {
+		t.Fatalf("pending = %v, want [1]", got)
+	}
+
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	if found, err := m.RestoreNotified(ctx, "ufo", 77, at); err != nil || !found {
+		t.Fatalf("RestoreNotified = %v, %v; want true", found, err)
+	}
+	if found, err := m.RestoreNotified(ctx, "missing", 78, at); err != nil || found {
+		t.Fatalf("RestoreNotified(missing) = %v, %v; want false", found, err)
+	}
+	if got := pendingIDs(t, m); len(got) != 0 {
+		t.Fatalf("pending after restore = %v, want none", got)
+	}
+	var doc struct {
+		MessageID  int       `bson:"telegram_message_id"`
+		NotifiedAt time.Time `bson:"notified_at"`
+	}
+	if err := m.db.Collection(marketsCollection).FindOne(ctx, bson.D{{Key: "_id", Value: "1"}}).Decode(&doc); err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if doc.MessageID != 77 || !doc.NotifiedAt.Equal(at) {
+		t.Fatalf("doc = %+v, want message 77 at %v", doc, at)
+	}
+	// A recompute must not queue it again.
+	if _, err := m.MarkAwesome(ctx, FilterRules{DenyTags: []string{"Sports"}}); err != nil {
+		t.Fatalf("MarkAwesome again: %v", err)
+	}
+	if got := pendingIDs(t, m); len(got) != 0 {
+		t.Fatalf("pending after recompute = %v, want none", got)
+	}
+}

@@ -152,3 +152,24 @@ func (m *MongoDB) MarkDeleteFailed(ctx context.Context, id, reason string) error
 	}
 	return nil
 }
+
+// RestoreNotified records a channel message found in a chat export (after
+// the database was lost): the market counts as announced with that message,
+// so it is not posted again and its message can be edited or deleted.
+// Returns false when no market has the slug.
+func (m *MongoDB) RestoreNotified(ctx context.Context, slug string, messageID int, at time.Time) (bool, error) {
+	res, err := m.db.Collection(marketsCollection).UpdateOne(ctx,
+		bson.D{{Key: "slug", Value: slug}},
+		bson.D{
+			{Key: "$set", Value: bson.D{
+				{Key: fieldNotifiedAt, Value: at.UTC()},
+				{Key: fieldMessageID, Value: messageID},
+			}},
+			{Key: "$unset", Value: bson.D{{Key: fieldNotifyPending, Value: ""}}},
+		},
+	)
+	if err != nil {
+		return false, fmt.Errorf("restore message %d of market %s: %w", messageID, slug, err)
+	}
+	return res.MatchedCount > 0, nil
+}

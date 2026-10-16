@@ -79,7 +79,7 @@ curl http://127.0.0.1:8080/health   # OK
 `make help` lists all commands.
 
 > [!WARNING]
-> `make clean` deletes the MongoDB data volume: all loaded markets and the filter rules (`filter_rules` and its history) are lost — nothing is seeded back, market updates stay paused until a deny rule is added again. MongoDB users are recreated from the passwords currently in `.env`.
+> With `MONGO_DATA` set to a host directory (recommended on a server), MongoDB data lives there and `make clean` does not touch it. Otherwise `make clean` deletes the MongoDB data volume: all loaded markets and the filter rules (`filter_rules` and its history) are lost — nothing is seeded back, market updates stay paused until a deny rule is added again. MongoDB users are recreated from the passwords currently in `.env`.
 
 ### MongoDB users
 
@@ -104,6 +104,7 @@ The bot is configured with environment variables. Docker Compose takes them from
 | Variable | Default | Description |
 |---|---|---|
 | `MONGO_URI` | `mongodb://localhost:27017` | Bot connection to MongoDB as `polymarket_app`. Docker Compose builds it from `MONGO_APP_*`; needed in `.env` for `go run` |
+| `MONGO_DATA` | `mongodb_data` (Docker volume) | Where MongoDB keeps its data. A host directory (e.g. `/srv/polymarket/mongo`) survives `make clean` and `docker compose down -v` |
 | `MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD` | `root` / — | MongoDB administrator (password required) |
 | `MONGO_APP_USER` / `MONGO_APP_PASSWORD` | `polymarket_app` / — | Bot user (password required) |
 | `MONGO_TEST_USER` / `MONGO_TEST_PASSWORD` | `polymarket_test` / — | Test user (password required) |
@@ -145,9 +146,19 @@ make notify-backfill    # queue all open awesome markets never announced (slow, 
 make notify-reformat    # re-render and edit all posted messages after a format change (slow)
 make notify-edits-stop  # cancel queued edits; edited messages stay as they are
 make notify-deletes-stop # cancel queued deletions; messages stay in the channel
+make notify-restore file=result.json # after a lost DB: restore which markets were posted
 make rules              # current filter rules
 make rules-history      # last rule edits (n=50 for more)
 ```
+
+#### Restoring posts after a lost database
+
+The Bot API cannot read channel history, so posted messages are restored from a channel export. **Do not start the bot before this**: it would post every awesome market again.
+
+1. Telegram Desktop → the channel → ⋮ → Export chat history: format **JSON**, no media. You get `result.json`.
+2. `make markets-load`, add the filter rules again (`make rule-add …`), `make markets-awesome`.
+3. `make notify-restore file=/path/to/result.json`: every message with a Polymarket link is matched to its market by slug and stored as its post (`notified_at`, `telegram_message_id`), and the market leaves the notification queue. Unmatched links are logged.
+4. Start the bot. Posted markets that are no longer awesome are queued for deletion by the next `make markets-awesome`.
 
 #### Filter rules
 

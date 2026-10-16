@@ -31,7 +31,9 @@ services:
     ports:
       - "127.0.0.1:27017:27017"
     volumes:
-      - mongodb_data:/data/db
+      # A named volume by default; on a server set MONGO_DATA to a host
+      # directory (e.g. /srv/polymarket/mongo): `down -v` never deletes it.
+      - ${MONGO_DATA:-mongodb_data}:/data/db
       - ./docker/mongo-init:/docker-entrypoint-initdb.d:ro
     restart: unless-stopped
 

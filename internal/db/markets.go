@@ -25,6 +25,8 @@ func (m *MongoDB) EnsureMarketIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "updated_at", Value: -1}}},
 		{Keys: bson.D{{Key: "closed", Value: 1}}},
 		{Keys: bson.D{{Key: "tags", Value: 1}}},
+		// Restoring channel posts from a chat export finds markets by slug.
+		{Keys: bson.D{{Key: "slug", Value: 1}}},
 		{Keys: bson.D{{Key: fieldIsAwesome, Value: 1}, {Key: "closed", Value: 1}}},
 		// Notification queue: tiny, holds only pending markets.
 		{
