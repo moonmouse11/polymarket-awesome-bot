@@ -25,9 +25,18 @@ clean: ## Stop containers and remove volumes
 ENV := set -a; . ./.env; set +a
 MONGOSH := docker compose exec -T mongodb mongosh --quiet "$$MONGO_URI"
 
+# Go commands: `go run` where Go is installed (development), otherwise in the
+# bot image (a server needs no Go toolchain). Force one with GO_CMD=docker|go.
+GO_CMD ?= $(if $(shell command -v go),go,docker)
+ifeq ($(GO_CMD),docker)
+RUN_CMD = docker compose run --rm -T bot ./$(1)
+else
+RUN_CMD = go run ./cmd/$(1)
+endif
+
 markets-load: ## Full load of all markets (open, then closed) into Mongo
 	@lvl="$$LOG_LEVEL"; fmt="$$LOG_FORMAT"; $(ENV); \
-		LOG_LEVEL="$${lvl:-$$LOG_LEVEL}" LOG_FORMAT="$${fmt:-$$LOG_FORMAT}" go run ./cmd/load-markets
+		LOG_LEVEL="$${lvl:-$$LOG_LEVEL}" LOG_FORMAT="$${fmt:-$$LOG_FORMAT}" $(call RUN_CMD,load-markets)
 
 markets-count: ## Count markets: total / open / closed / active
 	@$(ENV); $(MONGOSH) --eval 'printjson({total: db.markets.countDocuments(), closed: db.markets.countDocuments({closed: true}), active: db.markets.countDocuments({active: true}), last_sync: db.markets.find({}, {synced_at: 1}).sort({synced_at: -1}).limit(1).toArray()[0]?.synced_at})'
@@ -45,7 +54,7 @@ markets-show: ## Show one full market document: make markets-show ID=559651
 
 markets-awesome: ## Recompute awesome for all markets from filter_rules; queues deletion of posted markets no longer awesome
 	@lvl="$$LOG_LEVEL"; fmt="$$LOG_FORMAT"; $(ENV); \
-		LOG_LEVEL="$${lvl:-$$LOG_LEVEL}" LOG_FORMAT="$${fmt:-$$LOG_FORMAT}" go run ./cmd/mark-awesome
+		LOG_LEVEL="$${lvl:-$$LOG_LEVEL}" LOG_FORMAT="$${fmt:-$$LOG_FORMAT}" $(call RUN_CMD,mark-awesome)
 
 awesome-count: ## Awesome counts by reason, and which rules decided
 	@$(ENV); $(MONGOSH) --eval 'const by = (reason, field) => db.markets.aggregate([{$$match: {awesome_reason: reason}}, {$$unwind: "$$awesome_matches." + field}, {$$group: {_id: "$$awesome_matches." + field, n: {$$sum: 1}}}, {$$sort: {n: -1}}]).toArray(); printjson({awesome: db.markets.countDocuments({is_awesome: true}), awesome_open: db.markets.countDocuments({is_awesome: true, closed: false}), not_checked: db.markets.countDocuments({is_awesome: {$$exists: false}}), by_reason: db.markets.aggregate([{$$group: {_id: "$$awesome_reason", n: {$$sum: 1}}}, {$$sort: {n: -1}}]).toArray(), allowed_by_tag: by("allow", "allow_tags"), allowed_by_word: by("allow", "allow_words"), denied_by_tag: by("deny", "deny_tags"), denied_by_word: by("deny", "deny_words")})'
@@ -70,7 +79,12 @@ notify-deletes-stop: ## Cancel all queued message deletions (messages stay in th
 
 notify-restore: ## After a lost DB: mark markets posted per a channel export: make notify-restore file=result.json
 	@test -n "$(file)" || (echo "usage: make notify-restore file=result.json" && exit 1)
+	@test -f "$(file)" || (echo "no such file: $(file)" && exit 1)
+ifeq ($(GO_CMD),docker)
+	@$(ENV); docker compose run --rm -T -v "$(abspath $(file)):/tmp/export.json:ro" bot ./restore-posts /tmp/export.json
+else
 	@$(ENV); go run ./cmd/restore-posts "$(file)"
+endif
 
 sync-state: ## Show polling progress (watermark, last successful cycle)
 	@$(ENV); $(MONGOSH) --eval 'printjson(db.sync_state.find().toArray())'
@@ -85,16 +99,16 @@ rule-add rule-remove: export RULE_VALUE = $(value)
 rules-history: export RULE_N = $(n)
 
 rule-add: ## Add a filter rule: make rule-add kind=tag|word action=allow|deny value="Soccer"
-	@$(ENV); go run ./cmd/rules add "$$RULE_KIND" "$$RULE_ACTION" "$$RULE_VALUE"
+	@$(ENV); $(call RUN_CMD,rules) add "$$RULE_KIND" "$$RULE_ACTION" "$$RULE_VALUE"
 
 rule-remove: ## Remove a filter rule: make rule-remove kind=tag|word value="Games"
-	@$(ENV); go run ./cmd/rules remove "$$RULE_KIND" "$$RULE_VALUE"
+	@$(ENV); $(call RUN_CMD,rules) remove "$$RULE_KIND" "$$RULE_VALUE"
 
 rules: ## Show the filter rules (allow/deny tags and words)
-	@$(ENV); go run ./cmd/rules list
+	@$(ENV); $(call RUN_CMD,rules) list
 
 rules-history: ## Last filter rule edits: make rules-history [n=50]
-	@$(ENV); go run ./cmd/rules history $${RULE_N:-20}
+	@$(ENV); $(call RUN_CMD,rules) history $${RULE_N:-20}
 
 # --- Code quality (golangci-lint runs in Docker, same image as CI) ---
 # Pinned version: the same command must give the same result locally and in CI.

@@ -20,6 +20,9 @@ services:
   mongodb:
     # Exact version: a major upgrade needs featureCompatibilityVersion steps first.
     image: mongo:9.0.2
+    # Cap the cache (default: half of RAM minus 1 GB): on a 1 GB server the
+    # default would leave no room for the bot and the OS. 0.25 is the minimum.
+    command: ["--wiredTigerCacheSizeGB", "${MONGO_CACHE_GB:-0.25}"]
     environment:
       # Root and the users below are created only on the first start with an empty volume.
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER:-root}

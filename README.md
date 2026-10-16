@@ -105,6 +105,7 @@ The bot is configured with environment variables. Docker Compose takes them from
 |---|---|---|
 | `MONGO_URI` | `mongodb://localhost:27017` | Bot connection to MongoDB as `polymarket_app`. Docker Compose builds it from `MONGO_APP_*`; needed in `.env` for `go run` |
 | `MONGO_DATA` | `mongodb_data` (Docker volume) | Where MongoDB keeps its data. A host directory (e.g. `/srv/polymarket/mongo`) survives `make clean` and `docker compose down -v` |
+| `MONGO_CACHE_GB` | `0.25` | MongoDB cache in GB (minimum 0.25), sized for a 1–2 GB server. Raise it where RAM allows: recomputes are much faster when indexes fit |
 | `MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD` | `root` / — | MongoDB administrator (password required) |
 | `MONGO_APP_USER` / `MONGO_APP_PASSWORD` | `polymarket_app` / — | Bot user (password required) |
 | `MONGO_TEST_USER` / `MONGO_TEST_PASSWORD` | `polymarket_test` / — | Test user (password required) |
@@ -121,6 +122,8 @@ The bot is configured with environment variables. Docker Compose takes them from
 An invalid `LOG_LEVEL` or `LOG_FORMAT`, a wrong Telegram token or an unknown channel stops the bot at startup. If Telegram is merely unreachable, the bot starts anyway: markets keep updating and notifications wait in the queue.
 
 ## Usage
+
+The `make` targets that run Go commands (`markets-load`, `markets-awesome`, `rule-*`, `rules*`, `notify-restore`) use `go run` where Go is installed and otherwise run the same command in the bot image (`docker compose run --rm bot ./rules list`), so a server needs no Go toolchain. Force one with `GO_CMD=docker` or `GO_CMD=go`.
 
 ### Loading and exploring markets
 

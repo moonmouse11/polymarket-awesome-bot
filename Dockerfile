@@ -8,7 +8,9 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o polymarket-bot ./cmd/bot
+# Every command, not only the bot: the server has no Go toolchain, so the
+# make targets run them in this image (docker compose run --rm bot ./rules).
+RUN go build -o bin/ ./cmd/...
 
 FROM alpine:3.24.2
 
@@ -17,9 +19,9 @@ RUN adduser -D -H -u 10001 app
 
 WORKDIR /app
 
-COPY --from=builder /app/polymarket-bot .
+COPY --from=builder /app/bin/ .
 
 # Numeric UID: Kubernetes runAsNonRoot can only verify a numeric user.
 USER 10001
 
-CMD ["./polymarket-bot"]
+CMD ["./bot"]
