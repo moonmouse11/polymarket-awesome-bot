@@ -58,7 +58,29 @@ jobs:
             -u root -p ci-root --authenticationDatabase admin \
             --eval 'db.getSiblingDB("polymarket_test").createUser({user: "polymarket_test", pwd: "ci-test", roles: [{role: "dbOwner", db: "polymarket_test"}]})'
       # CI=true makes DB tests fail instead of skipping when MongoDB is unreachable.
-      - run: go test -race -count=1 ./...
+      - run: go test -race -count=1 -coverprofile=coverage.out ./...
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: coverage.out
+
+  # Required check: fails when the SonarQube Cloud quality gate fails (sonar.qualitygate.wait).
+  sonar:
+    needs: test
+    runs-on: ubuntu-latest
+    # Fork and Dependabot PRs get no SONAR_TOKEN; skip instead of failing
+    # (a skipped job satisfies a required check).
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history for blame and new-code detection
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage
+      - uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   build:
     runs-on: ubuntu-latest
