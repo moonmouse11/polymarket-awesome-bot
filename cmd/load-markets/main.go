@@ -24,6 +24,16 @@ const (
 	pageBuffer = 10
 )
 
+// MarketLister is the Polymarket API (implemented by *polymarket.Client).
+type MarketLister interface {
+	AllMarkets(ctx context.Context, closed bool, fn func(page []polymarket.Market) error) error
+}
+
+// Upserter is MongoDB (implemented by *db.MongoDB).
+type Upserter interface {
+	UpsertMarkets(ctx context.Context, markets []polymarket.Market, syncedAt time.Time) (int, error)
+}
+
 func main() {
 	log, err := logger.New(os.Getenv("LOG_LEVEL"), os.Getenv("LOG_FORMAT"), os.Stdout)
 	if err != nil {
@@ -91,7 +101,7 @@ func run(ctx context.Context, log zerolog.Logger) error {
 // loadPass is a two-stage pipeline: one goroutine fetches pages from the API,
 // another writes them to MongoDB, so a page is written while the next one is
 // being fetched.
-func loadPass(ctx context.Context, log zerolog.Logger, client *polymarket.Client, mongoDB *db.MongoDB, closed bool) error {
+func loadPass(ctx context.Context, log zerolog.Logger, client MarketLister, store Upserter, closed bool) error {
 	log = log.With().Bool("closed", closed).Logger()
 	started := time.Now()
 	pages, total, skipped := 0, 0, 0
@@ -117,7 +127,7 @@ func loadPass(ctx context.Context, log zerolog.Logger, client *polymarket.Client
 	// Counters are touched only by the writer and read after g.Wait.
 	g.Go(func() error {
 		for page := range pageCh {
-			n, err := mongoDB.UpsertMarkets(gctx, page, time.Now())
+			n, err := store.UpsertMarkets(gctx, page, time.Now())
 			if err != nil {
 				return err
 			}

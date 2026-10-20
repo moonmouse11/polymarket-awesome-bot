@@ -45,6 +45,9 @@ type fakeStore struct {
 	marked     [][]string
 	rules      db.FilterRules
 	onSave     func() // called after the closed pass is saved
+
+	// errors returned by the matching methods
+	getErr, maxErr, rulesErr, upsertErr, markErr, saveErr error
 }
 
 func newFakeStore() *fakeStore {
@@ -52,6 +55,9 @@ func newFakeStore() *fakeStore {
 }
 
 func (f *fakeStore) GetSyncState(_ context.Context, id string) (*db.SyncState, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
 	st, ok := f.state[id]
 	if !ok {
 		return nil, nil
@@ -60,6 +66,9 @@ func (f *fakeStore) GetSyncState(_ context.Context, id string) (*db.SyncState, e
 }
 
 func (f *fakeStore) SaveSyncState(_ context.Context, st db.SyncState) error {
+	if f.saveErr != nil {
+		return f.saveErr
+	}
 	f.state[st.ID] = st
 	if f.onSave != nil && st.ID == "markets_closed" {
 		f.onSave()
@@ -68,24 +77,24 @@ func (f *fakeStore) SaveSyncState(_ context.Context, st db.SyncState) error {
 }
 
 func (f *fakeStore) MaxUpdatedAt(context.Context, bool) (time.Time, bool, error) {
-	return f.maxUpdated, !f.maxUpdated.IsZero(), nil
+	return f.maxUpdated, !f.maxUpdated.IsZero(), f.maxErr
 }
 
 func (f *fakeStore) UpsertMarkets(_ context.Context, ms []polymarket.Market, _ time.Time) (int, error) {
 	for _, m := range ms {
 		f.upserted = append(f.upserted, m.ID)
 	}
-	return 0, nil
+	return 0, f.upsertErr
 }
 
-func (f *fakeStore) FilterRules(context.Context) (db.FilterRules, error) { return f.rules, nil }
+func (f *fakeStore) FilterRules(context.Context) (db.FilterRules, error) { return f.rules, f.rulesErr }
 
 func (f *fakeStore) MarkAwesomeIDs(_ context.Context, ids []string, _ db.FilterRules) (int64, error) {
 	f.marked = append(f.marked, ids)
-	return int64(len(ids)), nil
+	return int64(len(ids)), f.markErr
 }
 
-func newTestUpdater(src Source, store Store) *Updater {
+func newTestUpdater(src UpdateLister, store Store) *Updater {
 	u := New(src, store, zerolog.Nop(), DefaultInterval)
 	u.now = func() time.Time { return base.Add(time.Hour) }
 	return u
@@ -295,5 +304,55 @@ func TestRun_ReportsCycles(t *testing.T) {
 	// First cycle: market "a" from the open and the closed pass.
 	if len(rep.markets) != 2 || rep.markets[0] != 2 || rep.errs[0] != nil || rep.errs[1] == nil {
 		t.Errorf("reported markets %v, errors %v; want [2 0] and an error in the second cycle", rep.markets, rep.errs)
+	}
+}
+
+func TestPass_StoreErrors(t *testing.T) {
+	dbDown := errors.New("mongo down")
+	page := &fakeSource{pages: [][]polymarket.Market{{{ID: "m", UpdatedAt: at(time.Minute)}}}}
+	for name, set := range map[string]func(*fakeStore){
+		"get state": func(f *fakeStore) { f.getErr = dbDown },
+		"max":       func(f *fakeStore) { f.maxErr = dbDown },
+		"rules":     func(f *fakeStore) { f.rulesErr = dbDown },
+		"upsert":    func(f *fakeStore) { f.upsertErr = dbDown },
+		"mark":      func(f *fakeStore) { f.markErr = dbDown },
+		"save":      func(f *fakeStore) { f.saveErr = dbDown },
+	} {
+		store := newFakeStore()
+		store.maxUpdated = base
+		set(store)
+		if _, err := newTestUpdater(page, store).pass(context.Background(), false); !errors.Is(err, dbDown) {
+			t.Errorf("%s: pass = %v, want %v", name, err, dbDown)
+		}
+	}
+}
+
+func TestPass_EmptyDBStartsFromNow(t *testing.T) {
+	store := newFakeStore()
+	src := &fakeSource{pages: [][]polymarket.Market{{{ID: "old", UpdatedAt: at(0)}}}}
+	if _, err := newTestUpdater(src, store).pass(context.Background(), true); err != nil {
+		t.Fatalf("pass: %v", err)
+	}
+	// now is base+1h: the market at base is older than the watermark, nothing is written.
+	if st := store.state["markets_closed"]; !st.Watermark.Equal(base.Add(time.Hour)) || len(store.upserted) != 0 {
+		t.Errorf("watermark %v, upserted %v; want %v and nothing", st.Watermark, store.upserted, base.Add(time.Hour))
+	}
+}
+
+func TestCycle_ReturnsFirstErrorAndRunsBothPasses(t *testing.T) {
+	store := newFakeStore()
+	store.rules = db.FilterRules{} // both passes fail
+	n, err := newTestUpdater(&fakeSource{}, store).cycle(context.Background())
+	if n != 0 || !errors.Is(err, ErrNoDenyRules) {
+		t.Errorf("cycle = %d, %v; want 0, ErrNoDenyRules", n, err)
+	}
+}
+
+func TestCycle_ShutdownIsNotAFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	src := &fakeSource{err: context.Canceled}
+	if _, err := newTestUpdater(src, newFakeStore()).cycle(ctx); err != nil {
+		t.Errorf("cycle on shutdown = %v, want nil", err)
 	}
 }

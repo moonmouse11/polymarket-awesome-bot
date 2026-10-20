@@ -36,7 +36,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, log, os.Args[1]); err != nil {
+	if err := run(ctx, log, os.Args[1], "polymarket"); err != nil {
 		log.Error().Err(err).Msg("Restoring posts failed")
 		os.Exit(1)
 	}
@@ -108,7 +108,7 @@ func marketSlug(href string) string {
 	return ""
 }
 
-func run(ctx context.Context, log zerolog.Logger, path string) error {
+func run(ctx context.Context, log zerolog.Logger, path, dbName string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -127,7 +127,7 @@ func run(ctx context.Context, log zerolog.Logger, path string) error {
 	}
 	dbCtx, dbCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer dbCancel()
-	mongoDB, err := db.NewMongoDB(dbCtx, mongoURI, "polymarket")
+	mongoDB, err := db.NewMongoDB(dbCtx, mongoURI, dbName)
 	if err != nil {
 		return fmt.Errorf("initialize MongoDB: %w", err)
 	}
@@ -141,10 +141,20 @@ func run(ctx context.Context, log zerolog.Logger, path string) error {
 		return err
 	}
 
-	// In message order, so a market posted twice keeps its latest message.
+	return restore(ctx, log, mongoDB, posts)
+}
+
+// Restorer is MongoDB (implemented by *db.MongoDB).
+type Restorer interface {
+	RestoreNotified(ctx context.Context, slug string, messageID int, at time.Time) (bool, error)
+}
+
+// restore marks the posted markets as notified.
+// In message order, so a market posted twice keeps its latest message.
+func restore(ctx context.Context, log zerolog.Logger, s Restorer, posts []post) error {
 	restored := 0
 	for _, p := range posts {
-		found, err := mongoDB.RestoreNotified(ctx, p.Slug, p.MessageID, p.At)
+		found, err := s.RestoreNotified(ctx, p.Slug, p.MessageID, p.At)
 		if err != nil {
 			return err
 		}

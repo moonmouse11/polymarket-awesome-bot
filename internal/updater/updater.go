@@ -32,8 +32,8 @@ const (
 // rules are added the next cycle processes everything missed.
 var ErrNoDenyRules = errors.New("no deny rules in filter_rules, market updates are paused until one is added with make rule-add")
 
-// Source is the Polymarket API (implemented by *polymarket.Client).
-type Source interface {
+// UpdateLister is the Polymarket API (implemented by *polymarket.Client).
+type UpdateLister interface {
 	RecentlyUpdated(ctx context.Context, closed bool, fn func(page []polymarket.Market) (bool, error)) error
 }
 
@@ -60,7 +60,7 @@ func (noReporter) Cycle(int, time.Duration, bool, error) {
 
 // Updater polls the API for updated markets.
 type Updater struct {
-	src      Source
+	src      UpdateLister
 	store    Store
 	log      zerolog.Logger
 	interval time.Duration
@@ -84,7 +84,7 @@ func ParseInterval(s string) (time.Duration, error) {
 	return d, nil
 }
 
-func New(src Source, store Store, log zerolog.Logger, interval time.Duration) *Updater {
+func New(src UpdateLister, store Store, log zerolog.Logger, interval time.Duration) *Updater {
 	return &Updater{
 		src:      src,
 		store:    store,

@@ -28,12 +28,12 @@ Or separately:
 ```bash
 make lint    # golangci-lint: linters + formatting check (does not change files)
 make fmt     # fix formatting (gofmt + goimports) in place
-make test    # go test -race ./... with MONGO_TEST_URI from .env
+make test    # go test -race -p 1 ./... with MONGO_TEST_URI from .env
 ```
 
 ### Tests
 
-Tests in `internal/logger`, `internal/analyzer` and `internal/polymarket` need nothing external. Tests in `internal/db` run against a real MongoDB as the `polymarket_test` user in the separate `polymarket_test` database, which is dropped before and after the tests. The test user has no access to the bot's database.
+Tests in `internal/logger`, `internal/analyzer` and `internal/polymarket` need nothing external. Tests in `internal/db` and the end-to-end test of `cmd/restore-posts` run against a real MongoDB as the `polymarket_test` user in the separate `polymarket_test` database, which the `internal/db` tests drop before and after each test. The test user has no access to the bot's database. Because the packages share that database, they run one at a time (`-p 1`).
 
 If `MONGO_TEST_URI` is not set or MongoDB is unreachable, these tests are **skipped** locally. In CI (the `CI` variable is set) they **fail** instead, so a broken database cannot turn into a green run without tests.
 
