@@ -188,26 +188,36 @@ func (m *Monitor) evaluate(ctx context.Context, s state) {
 		}
 
 		if r.active && !r.silent && (r.lastSent.IsZero() || s.Now.Sub(r.lastSent) >= remindEvery) {
-			prefix := "🔴"
-			if !r.lastSent.IsZero() {
-				prefix = "🔴 Still:"
-			}
-			msg := fmt.Sprintf("%s <b>%s</b>\nsince %s (%s)\n%s", prefix, html.EscapeString(r.title),
-				clock(r.since), Ago(s.Now.Sub(r.since)), html.EscapeString(r.detail))
-			if m.send(ctx, r.title, msg) {
-				r.lastSent = s.Now
-			}
+			m.sendFiring(ctx, r, s.Now)
 		}
 		if r.recovered {
-			msg := fmt.Sprintf("🟢 <b>Resolved: %s</b>\nlasted %s", html.EscapeString(r.title), Ago(r.recoveredAt.Sub(r.since)))
-			if r.silent {
-				msg = fmt.Sprintf("🟢 <b>%s</b>\nfrom %s to %s (%s)\nlast error: %s", html.EscapeString(r.title),
-					clock(r.since), clock(r.recoveredAt), Ago(r.recoveredAt.Sub(r.since)), html.EscapeString(r.detail))
-			}
-			if m.send(ctx, r.title, msg) {
-				r.recovered = false
-			}
+			m.sendResolved(ctx, r)
 		}
+	}
+}
+
+// sendFiring sends the first alert or a reminder for an active rule.
+func (m *Monitor) sendFiring(ctx context.Context, r *rule, now time.Time) {
+	prefix := "🔴"
+	if !r.lastSent.IsZero() {
+		prefix = "🔴 Still:"
+	}
+	msg := fmt.Sprintf("%s <b>%s</b>\nsince %s (%s)\n%s", prefix, html.EscapeString(r.title),
+		clock(r.since), Ago(now.Sub(r.since)), html.EscapeString(r.detail))
+	if m.send(ctx, r.title, msg) {
+		r.lastSent = now
+	}
+}
+
+// sendResolved reports a recovered rule; silent rules get the whole outage in one message.
+func (m *Monitor) sendResolved(ctx context.Context, r *rule) {
+	msg := fmt.Sprintf("🟢 <b>Resolved: %s</b>\nlasted %s", html.EscapeString(r.title), Ago(r.recoveredAt.Sub(r.since)))
+	if r.silent {
+		msg = fmt.Sprintf("🟢 <b>%s</b>\nfrom %s to %s (%s)\nlast error: %s", html.EscapeString(r.title),
+			clock(r.since), clock(r.recoveredAt), Ago(r.recoveredAt.Sub(r.since)), html.EscapeString(r.detail))
+	}
+	if m.send(ctx, r.title, msg) {
+		r.recovered = false
 	}
 }
 

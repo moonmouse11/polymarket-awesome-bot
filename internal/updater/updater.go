@@ -54,7 +54,9 @@ type Reporter interface {
 
 type noReporter struct{}
 
-func (noReporter) Cycle(int, time.Duration, bool, error) {}
+func (noReporter) Cycle(int, time.Duration, bool, error) {
+	// No health registry wired: the cycle is not tracked.
+}
 
 // Updater polls the API for updated markets.
 type Updater struct {

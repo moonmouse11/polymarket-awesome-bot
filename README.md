@@ -1,11 +1,21 @@
 # polymarket-awesome-bot
 
 [![CI](https://github.com/moonmouse11/polymarket-awesome-bot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moonmouse11/polymarket-awesome-bot/actions/workflows/ci.yml)
-[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=coverage)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
 [![Go version](https://img.shields.io/github/go-mod/go-version/moonmouse11/polymarket-awesome-bot)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Telegram channel](https://img.shields.io/badge/Telegram-@polymarket__search__awesome-26A5E4?logo=telegram)](https://t.me/polymarket_search_awesome)
+
+[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Reliability rating](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Security rating](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Maintainability rating](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=coverage)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Duplicated lines](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=bugs)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Code smells](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Technical debt](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=sqale_index)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Lines of code](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
 
 A bot that researches [Polymarket](https://polymarket.com) prediction markets: it finds *awesome* markets — unusual, strange, worth a closer look — and tracks how they change.
 
