@@ -61,8 +61,13 @@ type Reporter interface {
 
 type noReporter struct{}
 
-func (noReporter) Report(string, error)      {}
-func (noReporter) RateLimited(time.Duration) {}
+func (noReporter) Report(string, error) {
+	// No health registry wired: the outcome is not tracked.
+}
+
+func (noReporter) RateLimited(time.Duration) {
+	// No health registry wired: the outcome is not tracked.
+}
 
 // Notifier sends queued markets one by one and edits posted messages.
 type Notifier struct {

@@ -90,25 +90,7 @@ func run(ctx context.Context, s Store, args []string, by string) (string, error)
 	case cmd == "list" && len(args) == 0:
 		// Shown after every edit anyway.
 	case cmd == "history" && len(args) <= 1:
-		n := int64(20)
-		if len(args) == 1 {
-			v, err := strconv.ParseInt(args[0], 10, 64)
-			if err != nil || v <= 0 {
-				return "", fmt.Errorf("history: n must be a positive number, got %q", args[0])
-			}
-			n = v
-		}
-		changes, err := s.FilterRuleHistory(ctx, n)
-		if err != nil {
-			return out.String(), err
-		}
-		for _, c := range changes {
-			fmt.Fprintf(&out, "%s  %-6s %-5s %-4s %q  %s\n", c.At.UTC().Format("2006-01-02 15:04"), c.Op, c.Action, c.Kind, c.Value, c.By)
-		}
-		if len(changes) == 0 {
-			fmt.Fprintln(&out, "no changes yet")
-		}
-		return out.String(), nil
+		return history(ctx, s, args)
 	default:
 		return "", errors.New(usage)
 	}
@@ -120,6 +102,30 @@ func run(ctx context.Context, s Store, args []string, by string) (string, error)
 	printRules(&out, rules)
 	if cmd != "list" {
 		fmt.Fprintln(&out, "Applies to markets updated from now on; run make markets-awesome to recompute all.")
+	}
+	return out.String(), nil
+}
+
+// history lists the last n rule changes (20 by default).
+func history(ctx context.Context, s Store, args []string) (string, error) {
+	n := int64(20)
+	if len(args) == 1 {
+		v, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil || v <= 0 {
+			return "", fmt.Errorf("history: n must be a positive number, got %q", args[0])
+		}
+		n = v
+	}
+	changes, err := s.FilterRuleHistory(ctx, n)
+	if err != nil {
+		return "", err
+	}
+	var out strings.Builder
+	for _, c := range changes {
+		fmt.Fprintf(&out, "%s  %-6s %-5s %-4s %q  %s\n", c.At.UTC().Format("2006-01-02 15:04"), c.Op, c.Action, c.Kind, c.Value, c.By)
+	}
+	if len(changes) == 0 {
+		fmt.Fprintln(&out, "no changes yet")
 	}
 	return out.String(), nil
 }
