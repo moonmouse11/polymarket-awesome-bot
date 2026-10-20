@@ -94,7 +94,7 @@ func (f *fakeStore) MarkAwesomeIDs(_ context.Context, ids []string, _ db.FilterR
 	return int64(len(ids)), f.markErr
 }
 
-func newTestUpdater(src Source, store Store) *Updater {
+func newTestUpdater(src UpdateLister, store Store) *Updater {
 	u := New(src, store, zerolog.Nop(), DefaultInterval)
 	u.now = func() time.Time { return base.Add(time.Hour) }
 	return u

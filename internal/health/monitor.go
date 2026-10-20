@@ -30,8 +30,8 @@ type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
-// Queue reports the notification queue sizes (implemented by *db.MongoDB).
-type Queue interface {
+// QueueSizer reports the notification queue sizes (implemented by *db.MongoDB).
+type QueueSizer interface {
 	QueueSizes(ctx context.Context) (sends, edits int64, err error)
 }
 
@@ -68,7 +68,7 @@ type Monitor struct {
 	reg     *Registry
 	mongo   Pinger
 	tg      Pinger
-	queue   Queue
+	queue   QueueSizer
 	alerter Alerter
 	log     zerolog.Logger
 
@@ -76,7 +76,7 @@ type Monitor struct {
 	rules []*rule
 }
 
-func NewMonitor(reg *Registry, mongo, tg Pinger, queue Queue, alerter Alerter, log zerolog.Logger) *Monitor {
+func NewMonitor(reg *Registry, mongo, tg Pinger, queue QueueSizer, alerter Alerter, log zerolog.Logger) *Monitor {
 	return &Monitor{
 		reg: reg, mongo: mongo, tg: tg, queue: queue, alerter: alerter,
 		log:   log.With().Str("component", "monitor").Logger(),

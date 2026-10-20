@@ -28,7 +28,10 @@ jobs:
           version-file: .golangci-lint-version
 
   test:
-    runs-on: ubuntu-latest
+    # MongoDB 8+ refuses to start on kernels 6.19–7.0.13 (SERVER-121912), and
+    # some ubuntu-24.04 hosts run 6.19. Back to ubuntu-latest once runners
+    # move past 7.0.13.
+    runs-on: ubuntu-22.04
     services:
       mongodb:
         image: mongo:9.0.2

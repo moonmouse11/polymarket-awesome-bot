@@ -26,8 +26,8 @@ type Store interface {
 	Ping(ctx context.Context) error
 }
 
-// Alerts lists the problems happening now (implemented by *health.Monitor).
-type Alerts interface {
+// AlertLister lists the problems happening now (implemented by *health.Monitor).
+type AlertLister interface {
 	Active() []string
 }
 
@@ -61,7 +61,7 @@ type Commands struct {
 	admins map[int64]bool
 	store  Store
 	health *health.Registry
-	alerts Alerts
+	alerts AlertLister
 	log    zerolog.Logger
 	now    func() time.Time
 }
@@ -82,7 +82,7 @@ func New(admins []int64, store Store, reg *health.Registry, log zerolog.Logger) 
 }
 
 // WithAlerts adds the active alerts to /health_check. Call before Listen.
-func (c *Commands) WithAlerts(a Alerts) *Commands {
+func (c *Commands) WithAlerts(a AlertLister) *Commands {
 	c.alerts = a
 	return c
 }

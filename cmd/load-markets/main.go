@@ -24,13 +24,13 @@ const (
 	pageBuffer = 10
 )
 
-// Source is the Polymarket API (implemented by *polymarket.Client).
-type Source interface {
+// MarketLister is the Polymarket API (implemented by *polymarket.Client).
+type MarketLister interface {
 	AllMarkets(ctx context.Context, closed bool, fn func(page []polymarket.Market) error) error
 }
 
-// Store is MongoDB (implemented by *db.MongoDB).
-type Store interface {
+// Upserter is MongoDB (implemented by *db.MongoDB).
+type Upserter interface {
 	UpsertMarkets(ctx context.Context, markets []polymarket.Market, syncedAt time.Time) (int, error)
 }
 
@@ -101,7 +101,7 @@ func run(ctx context.Context, log zerolog.Logger) error {
 // loadPass is a two-stage pipeline: one goroutine fetches pages from the API,
 // another writes them to MongoDB, so a page is written while the next one is
 // being fetched.
-func loadPass(ctx context.Context, log zerolog.Logger, client Source, store Store, closed bool) error {
+func loadPass(ctx context.Context, log zerolog.Logger, client MarketLister, store Upserter, closed bool) error {
 	log = log.With().Bool("closed", closed).Logger()
 	started := time.Now()
 	pages, total, skipped := 0, 0, 0
