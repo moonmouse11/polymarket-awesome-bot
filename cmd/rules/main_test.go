@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 )
@@ -14,6 +15,9 @@ type fakeStore struct {
 	addErr  error
 	tagUsed bool
 	by      string
+	history []db.RuleChange
+	histErr error
+	histN   int64
 }
 
 func (f *fakeStore) FilterRules(context.Context) (db.FilterRules, error) { return f.rules, nil }
@@ -28,8 +32,9 @@ func (f *fakeStore) AddFilterRule(_ context.Context, kind, action, value, by str
 func (f *fakeStore) RemoveFilterRule(_ context.Context, kind, value, _ string) (db.FilterRule, error) {
 	return db.FilterRule{Kind: kind, Action: db.ActionDeny, Value: value}, nil
 }
-func (f *fakeStore) FilterRuleHistory(context.Context, int64) ([]db.RuleChange, error) {
-	return nil, nil
+func (f *fakeStore) FilterRuleHistory(_ context.Context, n int64) ([]db.RuleChange, error) {
+	f.histN = n
+	return f.history, f.histErr
 }
 func (f *fakeStore) TagInUse(context.Context, string) (bool, error) { return f.tagUsed, nil }
 
@@ -78,5 +83,36 @@ func TestRun_BadArguments(t *testing.T) {
 		if _, err := run(context.Background(), &fakeStore{}, args, ""); err == nil {
 			t.Errorf("run(%q) succeeded, want an error", args)
 		}
+	}
+}
+
+func TestRun_History(t *testing.T) {
+	s := &fakeStore{history: []db.RuleChange{{
+		At: time.Date(2026, 10, 9, 14, 5, 0, 0, time.UTC), Op: "add", Action: db.ActionDeny, Kind: db.KindTag, Value: "Sports", By: "pots",
+	}}}
+	out, err := run(context.Background(), s, []string{"history", "5"}, "")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if want := `2026-10-09 14:05  add    deny  tag  "Sports"  pots`; !strings.Contains(out, want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	if s.histN != 5 {
+		t.Errorf("n = %d, want 5", s.histN)
+	}
+}
+
+func TestRun_HistoryEmptyUsesDefault(t *testing.T) {
+	s := &fakeStore{}
+	out, err := run(context.Background(), s, []string{"history"}, "")
+	if err != nil || out != "no changes yet\n" || s.histN != 20 {
+		t.Errorf("out %q, err %v, n %d; want \"no changes yet\", nil, 20", out, err, s.histN)
+	}
+}
+
+func TestRun_HistoryError(t *testing.T) {
+	s := &fakeStore{histErr: errors.New("mongo down")}
+	if out, err := run(context.Background(), s, []string{"history"}, ""); err == nil || out != "" {
+		t.Errorf("out %q, err %v; want the error and no output", out, err)
 	}
 }
