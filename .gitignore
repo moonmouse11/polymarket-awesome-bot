@@ -30,3 +30,6 @@ go.work.sum
 .vscode/
 *.swp
 .DS_Store
+
+# Test coverage (CI uploads it to SonarQube Cloud)
+coverage.out
