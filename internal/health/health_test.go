@@ -161,3 +161,61 @@ func TestAgo(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistry_RateLimited(t *testing.T) {
+	_, now := newClock()
+	r := newRegistry(now)
+	r.RateLimited(10 * time.Minute)
+	s := r.Snapshot()
+	if s.RateLimits != 1 || s.LastPenalty != 10*time.Minute || !s.LimitedUntil.Equal(t0.Add(10*time.Minute)) {
+		t.Errorf("snapshot = %+v", s)
+	}
+	if NewRegistry().Snapshot().Started.IsZero() {
+		t.Error("NewRegistry: start time not set")
+	}
+}
+
+type fakePinger struct{ err error }
+
+func (f fakePinger) Ping(context.Context) error { return f.err }
+
+type fakeQueue struct {
+	sends int64
+	err   error
+}
+
+func (f fakeQueue) QueueSizes(context.Context) (int64, int64, error) { return f.sends, 0, f.err }
+
+func TestMonitor_CheckProbesAndAlerts(t *testing.T) {
+	a := &fakeAlerter{}
+	reg := newRegistry(time.Now)
+	m := NewMonitor(reg, fakePinger{errors.New("no reachable servers")}, fakePinger{}, fakeQueue{sends: queueHigh + 1}, a, zerolog.Nop())
+	ctx := context.Background()
+
+	m.check(ctx)
+	if len(a.sent) != 1 || !strings.Contains(a.sent[0], "Notification queue is growing") {
+		t.Fatalf("after 1 check: alerts %q, want only the queue alert", a.sent)
+	}
+	m.check(ctx) // second failed ping in a row
+	if len(a.sent) != 2 || !strings.Contains(a.sent[1], "MongoDB is unreachable") {
+		t.Errorf("after 2 checks: alerts %q, want the MongoDB alert", a.sent)
+	}
+	if s := reg.Snapshot(); s.Components[Telegram].LastOK.IsZero() || s.Components[Mongo].Fails != 2 {
+		t.Errorf("components = %+v", s.Components)
+	}
+}
+
+func TestMonitor_CheckSkipsWhenStopped(t *testing.T) {
+	a := &fakeAlerter{}
+	reg := newRegistry(time.Now)
+	m := NewMonitor(reg, fakePinger{errors.New("down")}, fakePinger{}, fakeQueue{err: errors.New("down")}, a, zerolog.Nop())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m.check(ctx)
+	if len(a.sent) != 0 || len(reg.Snapshot().Components) != 0 {
+		t.Errorf("a stopped check reported %+v and alerted %q", reg.Snapshot().Components, a.sent)
+	}
+	if err := m.Run(ctx); err != nil {
+		t.Errorf("Run = %v, want nil", err)
+	}
+}

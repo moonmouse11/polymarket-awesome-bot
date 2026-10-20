@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/health"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
 )
 
@@ -26,39 +27,42 @@ type fakeQueue struct {
 	deletes  []db.PendingDelete
 	deleted  []string
 	failed   []string
+
+	pendingErr error // returned by every Pending* call
+	markErr    error // returned by every Mark* call
 }
 
 func (f *fakeQueue) PendingDeletes(context.Context, int64) ([]db.PendingDelete, error) {
-	return f.deletes, nil
+	return f.deletes, f.pendingErr
 }
 
 func (f *fakeQueue) MarkDeleted(_ context.Context, ids []string, _ time.Time) error {
 	f.deleted = append(f.deleted, ids...)
-	return nil
+	return f.markErr
 }
 
 func (f *fakeQueue) MarkDeleteFailed(_ context.Context, id, _ string) error {
 	f.failed = append(f.failed, id)
-	return nil
+	return f.markErr
 }
 
 func (f *fakeQueue) PendingEdits(context.Context, int64) ([]db.AwesomeMarket, error) {
-	return f.edits, nil
+	return f.edits, f.pendingErr
 }
 
 func (f *fakeQueue) MarkEdited(_ context.Context, id string) error {
 	f.edited = append(f.edited, id)
-	return nil
+	return f.markErr
 }
 
 func (f *fakeQueue) PendingNotifications(context.Context, int64) ([]db.AwesomeMarket, error) {
-	return f.pending, nil
+	return f.pending, f.pendingErr
 }
 
 func (f *fakeQueue) MarkNotified(_ context.Context, id string, _ time.Time, messageID int) error {
 	f.notified = append(f.notified, id)
 	f.msgIDs = append(f.msgIDs, messageID)
-	return nil
+	return f.markErr
 }
 
 type fakeSender struct {
@@ -428,5 +432,139 @@ func TestTelegram_Delete(t *testing.T) {
 	}
 	if len(calls) != 3 || calls[0] != "deleteMessages [11,12]" || calls[1] != "deleteMessage 404" {
 		t.Errorf("calls = %q", calls)
+	}
+}
+
+type fakeReporter struct {
+	reports []error
+	limited []time.Duration
+}
+
+func (f *fakeReporter) Report(name string, err error) {
+	if name == health.Telegram {
+		f.reports = append(f.reports, err)
+	}
+}
+
+func (f *fakeReporter) RateLimited(d time.Duration) { f.limited = append(f.limited, d) }
+
+func TestObserve_ReportsTelegramHealth(t *testing.T) {
+	r := &fakeReporter{}
+	n := newTestNotifier(&fakeQueue{}, &fakeSender{}).WithHealth(r)
+	down := errors.New("connection refused")
+
+	n.observe(nil)
+	n.observe(fmt.Errorf("%w: chat not found", bot.ErrorBadRequest)) // rejected message: Telegram is up
+	n.observe(down)
+	n.observe(&bot.TooManyRequestsError{RetryAfter: 3})
+
+	if len(r.reports) != 3 || r.reports[0] != nil || r.reports[1] != nil || r.reports[2] != down {
+		t.Errorf("reports = %v, want [nil nil %v]", r.reports, down)
+	}
+	if len(r.limited) != 1 || r.limited[0] != 3*time.Second {
+		t.Errorf("rate limits = %v, want [3s]", r.limited)
+	}
+}
+
+// stopQueue cancels the context once `after` markets are announced.
+type stopQueue struct {
+	*fakeQueue
+	after  int
+	cancel context.CancelFunc
+}
+
+func (q *stopQueue) MarkNotified(ctx context.Context, id string, at time.Time, messageID int) error {
+	err := q.fakeQueue.MarkNotified(ctx, id, at, messageID)
+	if len(q.notified) == q.after {
+		q.cancel()
+	}
+	return err
+}
+
+func TestRun_RetriesAfterFailureAndStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	q := &stopQueue{fakeQueue: &fakeQueue{pending: []db.AwesomeMarket{market("1", "A?"), market("2", "B?")}}, after: 2, cancel: cancel}
+	s := &fakeSender{errs: map[int]error{0: errors.New("telegram down")}}
+	n := newTestNotifier(q, s)
+	n.idleWait = time.Millisecond
+
+	done := make(chan error, 1)
+	go func() { done <- n.Run(ctx) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run = %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("Run did not stop")
+	}
+	// The first send failed and was retried: 3 sends, 2 announcements.
+	if len(s.sent) != 3 || len(q.notified) != 2 || q.msgIDs[0] != 102 {
+		t.Errorf("sent %d, notified %v with ids %v; want 3 sends, [1 2] from id 102", len(s.sent), q.notified, q.msgIDs)
+	}
+}
+
+func TestStep_QueueErrors(t *testing.T) {
+	dbDown := errors.New("mongo down")
+	ctx := context.Background()
+
+	if _, err := newTestNotifier(&fakeQueue{pendingErr: dbDown}, &fakeSender{}).step(ctx); !errors.Is(err, dbDown) {
+		t.Errorf("step with Pending* failing = %v, want %v", err, dbDown)
+	}
+	for name, q := range map[string]*fakeQueue{
+		"delete": {deletes: []db.PendingDelete{{ID: "1", MessageID: 11}}, markErr: dbDown},
+		"send":   {pending: []db.AwesomeMarket{market("1", "A?")}, markErr: dbDown},
+		"edit":   {edits: []db.AwesomeMarket{market("1", "A?")}, markErr: dbDown},
+	} {
+		if _, err := newTestNotifier(q, &fakeSender{}).step(ctx); !errors.Is(err, dbDown) {
+			t.Errorf("%s with Mark* failing = %v, want %v", name, err, dbDown)
+		}
+	}
+}
+
+func TestBatches_TelegramDownStopsBatch(t *testing.T) {
+	down := errors.New("telegram down")
+	ctx := context.Background()
+
+	edit := &fakeQueue{edits: []db.AwesomeMarket{market("1", "A?")}}
+	if _, err := newTestNotifier(edit, &fakeSender{editEr: down}).editBatch(ctx); !errors.Is(err, down) || len(edit.edited) != 0 {
+		t.Errorf("editBatch = %v, edited %v; want the error and nothing marked", err, edit.edited)
+	}
+
+	// The batch delete is rejected, then a single delete fails with an outage.
+	del := &fakeQueue{deletes: []db.PendingDelete{{ID: "1", MessageID: 11}}}
+	s := &fakeSender{batchErr: bot.ErrorBadRequest, singleErr: map[int]error{11: down}}
+	if _, err := newTestNotifier(del, s).deleteBatch(ctx); !errors.Is(err, down) || len(del.deleted)+len(del.failed) != 0 {
+		t.Errorf("deleteBatch = %v, deleted %v failed %v; want the error and nothing marked", err, del.deleted, del.failed)
+	}
+}
+
+func TestPace_StopsOnCancel(t *testing.T) {
+	n := newTestNotifier(&fakeQueue{}, &fakeSender{})
+	n.sendEvery = time.Hour
+	n.lastCall = time.Now()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := n.pace(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("pace = %v, want context.Canceled", err)
+	}
+}
+
+func TestMoneyAndMarketURL(t *testing.T) {
+	for v, want := range map[float64]string{950: "$950", 48_000: "$48k", 1_200_000: "$1.2M"} {
+		if got := money(v); got != want {
+			t.Errorf("money(%v) = %q, want %q", v, got, want)
+		}
+	}
+	for _, tc := range []struct{ event, slug, want string }{
+		{"ev", "mk", "https://polymarket.com/event/ev/mk"},
+		{"ev", "", "https://polymarket.com/event/ev"},
+		{"", "mk", "https://polymarket.com/market/mk"},
+	} {
+		mk := db.AwesomeMarket{Market: polymarket.Market{EventSlug: tc.event, Slug: tc.slug}}
+		if got := marketURL(mk); got != tc.want {
+			t.Errorf("marketURL(%q, %q) = %q, want %q", tc.event, tc.slug, got, tc.want)
+		}
 	}
 }
