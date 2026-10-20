@@ -141,10 +141,20 @@ func run(ctx context.Context, log zerolog.Logger, path string) error {
 		return err
 	}
 
-	// In message order, so a market posted twice keeps its latest message.
+	return restore(ctx, log, mongoDB, posts)
+}
+
+// Store is MongoDB (implemented by *db.MongoDB).
+type Store interface {
+	RestoreNotified(ctx context.Context, slug string, messageID int, at time.Time) (bool, error)
+}
+
+// restore marks the posted markets as notified.
+// In message order, so a market posted twice keeps its latest message.
+func restore(ctx context.Context, log zerolog.Logger, s Store, posts []post) error {
 	restored := 0
 	for _, p := range posts {
-		found, err := mongoDB.RestoreNotified(ctx, p.Slug, p.MessageID, p.At)
+		found, err := s.RestoreNotified(ctx, p.Slug, p.MessageID, p.At)
 		if err != nil {
 			return err
 		}
