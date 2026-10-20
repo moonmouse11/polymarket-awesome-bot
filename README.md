@@ -1,6 +1,8 @@
 # polymarket-awesome-bot
 
 [![CI](https://github.com/moonmouse11/polymarket-awesome-bot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moonmouse11/polymarket-awesome-bot/actions/workflows/ci.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=moonmouse11_polymarket-awesome-bot&metric=coverage)](https://sonarcloud.io/summary/new_code?id=moonmouse11_polymarket-awesome-bot)
 [![Go version](https://img.shields.io/github/go-mod/go-version/moonmouse11/polymarket-awesome-bot)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Telegram channel](https://img.shields.io/badge/Telegram-@polymarket__search__awesome-26A5E4?logo=telegram)](https://t.me/polymarket_search_awesome)
