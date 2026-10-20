@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -10,6 +11,9 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
 )
 
 func TestParseExport(t *testing.T) {
@@ -111,8 +115,47 @@ func TestRun_FailsBeforeTouchingTheDatabase(t *testing.T) {
 		"no posts":     {write("empty.json", `{"messages": []}`), "no market links"},
 		"no mongo uri": {withPost, "MONGO_URI"},
 	} {
-		if err := run(context.Background(), zerolog.Nop(), tc.path); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if err := run(context.Background(), zerolog.Nop(), tc.path, "polymarket_test"); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
 		}
+	}
+}
+
+// The whole command against the test database (MONGO_TEST_URI, as in internal/db).
+func TestRun_RestoresPostsInMongo(t *testing.T) {
+	uri := os.Getenv("MONGO_TEST_URI")
+	if uri == "" {
+		if os.Getenv("CI") != "" {
+			t.Fatal("MONGO_TEST_URI is not set")
+		}
+		t.Skip("MONGO_TEST_URI is not set")
+	}
+	t.Setenv("MONGO_URI", uri)
+	ctx := context.Background()
+
+	m, err := db.NewMongoDB(ctx, uri, "polymarket_test")
+	if err != nil {
+		t.Fatalf("NewMongoDB: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close(context.Background()) })
+	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "ufo-id", Slug: "ufo-2027"}}, time.Now()); err != nil {
+		t.Fatalf("UpsertMarkets: %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "result.json")
+	export := `{"messages": [
+		{"id": 1, "type": "message", "date_unixtime": "1700000000", "text_entities": [{"type": "text_link", "href": "https://polymarket.com/market/ufo-2027"}]},
+		{"id": 2, "type": "message", "date_unixtime": "1700000060", "text_entities": [{"type": "text_link", "href": "https://polymarket.com/market/unknown"}]}
+	]}`
+	if err := os.WriteFile(path, []byte(export), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	if err := run(ctx, zerolog.New(&logs), path, "polymarket_test"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if want := `"posts":2,"restored":1,"unmatched":1`; !strings.Contains(logs.String(), want) {
+		t.Errorf("summary lacks %s:\n%s", want, logs.String())
 	}
 }
