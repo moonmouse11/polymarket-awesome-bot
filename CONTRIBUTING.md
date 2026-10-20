@@ -57,7 +57,8 @@ The linter version lives in one place, `.golangci-lint-version`. Both the Makefi
 ## Pull requests
 
 - Keep a pull request focused on one change.
-- `make check` must pass. CI runs the same checks on every pull request: lint, tests with MongoDB, and a Docker image build.
+- `make check` must pass. CI runs the same checks on every pull request: lint, tests with MongoDB, a Docker image build and the [SonarQube Cloud](https://sonarcloud.io/project/overview?id=moonmouse11_polymarket-awesome-bot) quality gate (bugs, code smells, duplication and coverage of new code). `main` is protected: changes land only through a pull request with all checks green.
+- By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 - Update `README.md` when behavior, commands or configuration change.
 - Never commit secrets: `.env` is ignored by git, use `.env.example` for new variables.
 
