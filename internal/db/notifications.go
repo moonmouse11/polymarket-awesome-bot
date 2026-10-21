@@ -8,16 +8,17 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/awesome"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
 )
 
 // AwesomeMarket is a market waiting for a notification, with the reason it is awesome.
 type AwesomeMarket struct {
 	polymarket.Market `bson:",inline"`
-	Reason            string    `bson:"awesome_reason"`
-	Matches           Matches   `bson:"awesome_matches,omitempty"`
-	Since             time.Time `bson:"awesome_since"`
-	MessageID         int       `bson:"telegram_message_id,omitempty"`
+	Reason            string          `bson:"awesome_reason"`
+	Matches           awesome.Matches `bson:"awesome_matches,omitempty"`
+	Since             time.Time       `bson:"awesome_since"`
+	MessageID         int             `bson:"telegram_message_id,omitempty"`
 }
 
 // PendingNotifications returns up to limit markets that became awesome while

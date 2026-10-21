@@ -3,18 +3,20 @@ package db
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/awesome"
 )
 
 // Fields written by MarkAwesome. They are not part of polymarket.Market, so
 // the loader's $set never touches them.
 const (
 	fieldIsAwesome        = "is_awesome"
-	fieldAwesomeReason    = "awesome_reason"  // see Reason* below
+	fieldAwesomeReason    = "awesome_reason"  // awesome.Reason*
 	fieldAwesomeMatches   = "awesome_matches" // every rule the market matched; absent when none
 	fieldAwesomeCheckedAt = "awesome_checked_at"
 	fieldAwesomeSince     = "awesome_since"       // when the market last became awesome; absent when not awesome
@@ -26,56 +28,19 @@ const (
 	fieldDeletedAt        = "telegram_deleted_at" // when its last channel message was deleted
 )
 
-// Values of awesome_reason.
 const (
-	ReasonAllow   = "allow"   // awesome: an allow tag or word matched (wins over deny rules)
-	ReasonDeny    = "deny"    // not awesome: a deny rule matched and no allow rule did
-	ReasonDefault = "default" // awesome: no rule matched
+	markBatch   = 5000 // markets per bulk write
+	markWriters = 2    // bulk writes in flight; 4 is no faster
 )
-
-// Matches are the rules a market matched, stored in awesome_matches. Every
-// list is kept, not only the deciding one, so the effect of a rule edit can
-// be counted without rescanning the text.
-type Matches struct {
-	AllowTags  []string `bson:"allow_tags,omitempty"`
-	DenyTags   []string `bson:"deny_tags,omitempty"`
-	AllowWords []string `bson:"allow_words,omitempty"`
-	DenyWords  []string `bson:"deny_words,omitempty"`
-}
 
 // Fields replaced by awesome_matches; a recompute removes them.
 var legacyAwesomeFields = bson.A{"awesome_words", "awesome_excluded_tag"}
 
-// Temporary fields, removed in the same update and never stored.
-const (
-	tmpText       = "_awesome_text"
-	tmpAllowTags  = "_awesome_allow_tags"
-	tmpDenyTags   = "_awesome_deny_tags"
-	tmpAllowWords = "_awesome_allow_words"
-	tmpDenyWords  = "_awesome_deny_words"
-)
-
-// wordPattern finds a word at the start of a word in the text: "alien"
-// matches "alien" and "aliens", not "Valiente". The text is lowercased with
-// $toLower, which handles ASCII only: a word with non-ASCII letters matches
-// only lowercase text.
-func wordPattern(word string) string {
-	return `(?:^|[^\p{L}\p{N}])` + regexp.QuoteMeta(word)
-}
-
-// MarkAwesome recomputes the awesome fields for every market in one
-// server-side update. It is run after the rules change, so it also queues
-// the channel messages of markets that are no longer awesome for deletion
-// (delete_pending); MarkAwesomeIDs, run on every update, does not.
-//
-// The decision:
-//   - an allow tag or allow word matched → awesome (allow wins);
-//   - otherwise a deny tag or deny word matched → not awesome;
-//   - otherwise → awesome.
-//
-// Tags match exactly. Words match at the start of a word, any case, in
-// question, event_title, description and tags. It returns how many markets
-// were matched.
+// MarkAwesome recomputes the awesome fields for every market. It is run
+// after the rules change, so it also queues the channel messages of markets
+// that are no longer awesome for deletion (delete_pending); MarkAwesomeIDs,
+// run on every update, does not. The decision is awesome.Classify. It
+// returns how many markets were checked.
 func (m *MongoDB) MarkAwesome(ctx context.Context, rules FilterRules) (int64, error) {
 	return m.markAwesome(ctx, bson.D{}, rules, true)
 }
@@ -88,108 +53,120 @@ func (m *MongoDB) MarkAwesomeIDs(ctx context.Context, ids []string, rules Filter
 	return m.markAwesome(ctx, bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}, rules, false)
 }
 
+// awesomeInput is the part of a market document Classify needs.
+type awesomeInput struct {
+	ID          string   `bson:"_id"`
+	Question    string   `bson:"question"`
+	EventTitle  string   `bson:"event_title"`
+	Description string   `bson:"description"`
+	Tags        []string `bson:"tags"`
+}
+
+// markAwesome reads the markets, classifies them and writes the verdicts in
+// batches. Updating the collection while reading it is safe: an update
+// keeps the document's place in the scan.
 func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, rules FilterRules, deletePosted bool) (int64, error) {
-	ifNull := func(field string, def interface{}) bson.D {
-		return bson.D{{Key: "$ifNull", Value: bson.A{field, def}}}
+	coll := m.db.Collection(marketsCollection)
+	cur, err := coll.Find(ctx, filter, options.Find().SetBatchSize(markBatch).SetProjection(bson.D{
+		{Key: "question", Value: 1}, {Key: "event_title", Value: 1}, {Key: "description", Value: 1}, {Key: "tags", Value: 1},
+	}))
+	if err != nil {
+		return 0, fmt.Errorf("read markets to mark: %w", err)
 	}
-	size := func(field string) bson.D { return bson.D{{Key: "$size", Value: "$" + field}} }
-	nonEmpty := func(field string) bson.D { return bson.D{{Key: "$gt", Value: bson.A{size(field), 0}}} }
+	defer func() { _ = cur.Close(context.Background()) }()
 
-	// Tags of the list present in the market's tags, in list order.
-	tagsFound := func(list []string) bson.D {
-		if list == nil {
-			list = []string{} // null would break $filter
-		}
-		return bson.D{{Key: "$filter", Value: bson.D{
-			{Key: "input", Value: list},
-			{Key: "cond", Value: bson.D{{Key: "$in", Value: bson.A{"$$this", ifNull("$tags", bson.A{})}}}},
-		}}}
+	// Markets of a batch with the same verdict share one update: there are
+	// few distinct verdicts. Batches are written by markWriters goroutines
+	// while the next ones are read: done in turn, reads and writes stall each
+	// other and the recompute is 2x slower than with this overlap.
+	type group struct {
+		v   awesome.Verdict
+		ids []string
 	}
-	// Words of the list found in the text, in list order. Each word is a
-	// constant in the pipeline: a byte search first (cheap, rarely true),
-	// then the word-start regex. Measured on 100k markets: 5 s, against 41 s
-	// for $indexOfCP and 230 s for regexes alone.
-	wordsFound := func(list []string) bson.D {
-		found := bson.A{}
-		for _, w := range list {
-			// An empty word would match every market.
-			if w = strings.ToLower(strings.TrimSpace(w)); w == "" {
-				continue
+	g, gctx := errgroup.WithContext(ctx)
+	batches := make(chan map[string]*group)
+	for range markWriters {
+		g.Go(func() error {
+			for groups := range batches {
+				models := make([]mongo.WriteModel, 0, len(groups))
+				for _, gr := range groups {
+					models = append(models, mongo.NewUpdateManyModel().
+						SetFilter(bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: gr.ids}}}}).
+						SetUpdate(verdictUpdate(gr.v, deletePosted)))
+				}
+				if _, err := coll.BulkWrite(gctx, models, options.BulkWrite().SetOrdered(false)); err != nil {
+					return fmt.Errorf("mark awesome markets: %w", err)
+				}
 			}
-			found = append(found, bson.D{{Key: "$cond", Value: bson.A{
-				bson.D{{Key: "$and", Value: bson.A{
-					bson.D{{Key: "$gte", Value: bson.A{bson.D{{Key: "$indexOfBytes", Value: bson.A{"$" + tmpText, w}}}, 0}}},
-					bson.D{{Key: "$regexMatch", Value: bson.D{
-						{Key: "input", Value: "$" + tmpText}, {Key: "regex", Value: wordPattern(w)}, {Key: "options", Value: "i"},
-					}}},
-				}}},
-				w, nil,
-			}}})
+			return nil
+		})
+	}
+
+	var checked int64
+	g.Go(func() error {
+		defer close(batches)
+		send := func(groups map[string]*group) error {
+			select {
+			case batches <- groups:
+				return nil
+			case <-gctx.Done():
+				return gctx.Err()
+			}
 		}
-		return bson.D{{Key: "$filter", Value: bson.D{
-			{Key: "input", Value: found},
-			{Key: "cond", Value: bson.D{{Key: "$ne", Value: bson.A{"$$this", nil}}}},
-		}}}
+		pending, groups := 0, map[string]*group{}
+		for cur.Next(gctx) {
+			var mk awesomeInput
+			if err := cur.Decode(&mk); err != nil {
+				return fmt.Errorf("decode market: %w", err)
+			}
+			v := awesome.Classify(awesome.Market{Question: mk.Question, EventTitle: mk.EventTitle, Description: mk.Description, Tags: mk.Tags}, rules)
+			key := fmt.Sprintf("%q", v) // %q keeps list boundaries unambiguous
+			gr := groups[key]
+			if gr == nil {
+				gr = &group{v: v}
+				groups[key] = gr
+			}
+			gr.ids = append(gr.ids, mk.ID)
+			checked++
+			if pending++; pending == markBatch {
+				if err := send(groups); err != nil {
+					return err
+				}
+				pending, groups = 0, map[string]*group{}
+			}
+		}
+		if err := cur.Err(); err != nil {
+			return fmt.Errorf("read markets to mark: %w", err)
+		}
+		if pending > 0 {
+			return send(groups)
+		}
+		return nil
+	})
+	err = g.Wait()
+	return checked, err
+}
+
+// verdictUpdate stores a verdict and moves the market between the channel
+// queues. The transitions depend on the document's previous state and run
+// on the server, so a concurrent write by the notifier is never lost.
+func verdictUpdate(v awesome.Verdict, deletePosted bool) mongo.Pipeline {
+	// $literal: a rule value starting with "$" must not read as a field path.
+	matches := interface{}("$$REMOVE")
+	if !v.Matches.Empty() {
+		matches = bson.D{{Key: "$literal", Value: v.Matches}}
 	}
-
-	// question + event_title + description + tags, lowercased.
-	text := bson.D{{Key: "$toLower", Value: bson.D{{Key: "$concat", Value: bson.A{
-		ifNull("$question", ""), " ",
-		ifNull("$event_title", ""), " ",
-		ifNull("$description", ""), " ",
-		bson.D{{Key: "$reduce", Value: bson.D{
-			{Key: "input", Value: ifNull("$tags", bson.A{})},
-			{Key: "initialValue", Value: ""},
-			{Key: "in", Value: bson.D{{Key: "$concat", Value: bson.A{"$$value", " ", "$$this"}}}},
-		}}},
-	}}}}}
-
-	allowed := bson.D{{Key: "$or", Value: bson.A{nonEmpty(tmpAllowTags), nonEmpty(tmpAllowWords)}}}
-	denied := bson.D{{Key: "$or", Value: bson.A{nonEmpty(tmpDenyTags), nonEmpty(tmpDenyWords)}}}
-	keep := func(field string) bson.D { // the list, or nothing when empty
-		return bson.D{{Key: "$cond", Value: bson.A{nonEmpty(field), "$" + field, "$$REMOVE"}}}
-	}
-	matchedAny := bson.D{{Key: "$gt", Value: bson.A{
-		bson.D{{Key: "$add", Value: bson.A{size(tmpAllowTags), size(tmpDenyTags), size(tmpAllowWords), size(tmpDenyWords)}}}, 0,
-	}}}
-
-	isAwesome := bson.D{{Key: "$ne", Value: bson.A{"$" + fieldAwesomeReason, ReasonDeny}}}
+	isAwesome := v.Awesome()
 	wasAwesome := bson.D{{Key: "$eq", Value: bson.A{"$" + fieldIsAwesome, true}}}
 
-	pipeline := mongo.Pipeline{
-		{{Key: "$set", Value: bson.D{
-			{Key: tmpText, Value: text},
-			{Key: tmpAllowTags, Value: tagsFound(rules.AllowTags)},
-			{Key: tmpDenyTags, Value: tagsFound(rules.DenyTags)},
-		}}},
-		{{Key: "$set", Value: bson.D{
-			{Key: tmpAllowWords, Value: wordsFound(rules.AllowWords)},
-			{Key: tmpDenyWords, Value: wordsFound(rules.DenyWords)},
-		}}},
-		{{Key: "$set", Value: bson.D{
-			{Key: fieldAwesomeReason, Value: bson.D{{Key: "$switch", Value: bson.D{
-				{Key: "branches", Value: bson.A{
-					bson.D{{Key: "case", Value: allowed}, {Key: "then", Value: ReasonAllow}},
-					bson.D{{Key: "case", Value: denied}, {Key: "then", Value: ReasonDeny}},
-				}},
-				{Key: "default", Value: ReasonDefault},
-			}}}},
-			{Key: fieldAwesomeMatches, Value: bson.D{{Key: "$cond", Value: bson.A{
-				matchedAny,
-				bson.D{
-					{Key: "allow_tags", Value: keep(tmpAllowTags)},
-					{Key: "deny_tags", Value: keep(tmpDenyTags)},
-					{Key: "allow_words", Value: keep(tmpAllowWords)},
-					{Key: "deny_words", Value: keep(tmpDenyWords)},
-				},
-				"$$REMOVE",
-			}}}},
-			{Key: fieldAwesomeCheckedAt, Value: "$$NOW"},
-		}}},
+	return mongo.Pipeline{
 		// Expressions in one $set see the values from before it, so
 		// "$is_awesome" here is the previous flag: this is where a transition
 		// to awesome is detected.
 		{{Key: "$set", Value: bson.D{
+			{Key: fieldAwesomeReason, Value: bson.D{{Key: "$literal", Value: v.Reason}}},
+			{Key: fieldAwesomeMatches, Value: matches},
+			{Key: fieldAwesomeCheckedAt, Value: "$$NOW"},
 			{Key: fieldIsAwesome, Value: isAwesome},
 			{Key: fieldAwesomeSince, Value: bson.D{{Key: "$cond", Value: bson.A{
 				isAwesome,
@@ -200,7 +177,7 @@ func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, rules FilterRu
 				{Key: "branches", Value: bson.A{
 					// Not awesome any more or closed: drop from the queue.
 					bson.D{{Key: "case", Value: bson.D{{Key: "$or", Value: bson.A{
-						bson.D{{Key: "$not", Value: bson.A{isAwesome}}},
+						!isAwesome,
 						bson.D{{Key: "$eq", Value: bson.A{"$closed", true}}},
 					}}}}, {Key: "then", Value: "$$REMOVE"}},
 					// Just became awesome and was never announced: enqueue.
@@ -225,14 +202,8 @@ func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, rules FilterRu
 				{Key: "default", Value: "$" + fieldDeletePending},
 			}}}},
 		}}},
-		{{Key: "$unset", Value: append(bson.A{tmpText, tmpAllowTags, tmpDenyTags, tmpAllowWords, tmpDenyWords}, legacyAwesomeFields...)}},
+		{{Key: "$unset", Value: legacyAwesomeFields}},
 	}
-
-	res, err := m.db.Collection(marketsCollection).UpdateMany(ctx, filter, pipeline)
-	if err != nil {
-		return 0, fmt.Errorf("mark awesome markets: %w", err)
-	}
-	return res.MatchedCount, nil
 }
 
 // CountAwesome returns how many markets are awesome, in total and still open.

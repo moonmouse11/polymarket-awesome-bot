@@ -3,22 +3,24 @@ package db
 import (
 	"context"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/awesome"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
 )
 
 // awesomeState is what MarkAwesome writes, read back from a market document.
 type awesomeState struct {
-	IsAwesome bool       `bson:"is_awesome"`
-	Reason    string     `bson:"awesome_reason"`
-	Matches   *Matches   `bson:"awesome_matches"`
-	CheckedAt *time.Time `bson:"awesome_checked_at"`
-	Question  string     `bson:"question"`
-	LastTrade float64    `bson:"last_trade_price"`
+	IsAwesome bool             `bson:"is_awesome"`
+	Reason    string           `bson:"awesome_reason"`
+	Matches   *awesome.Matches `bson:"awesome_matches"`
+	CheckedAt *time.Time       `bson:"awesome_checked_at"`
+	Question  string           `bson:"question"`
+	LastTrade float64          `bson:"last_trade_price"`
 	// Replaced by awesome_matches; must be removed by a recompute.
 	LegacyWords *[]string `bson:"awesome_words"`
 	LegacyTag   *string   `bson:"awesome_excluded_tag"`
@@ -75,22 +77,22 @@ func TestMarkAwesome_FourListsAllowWins(t *testing.T) {
 	tests := []struct {
 		id      string
 		reason  string
-		matches *Matches
+		matches *awesome.Matches
 	}{
-		{"sport", ReasonDeny, &Matches{DenyTags: []string{"Sports"}}},
-		{"case", ReasonDefault, nil},
-		{"culture", ReasonDefault, nil},
-		{"ai-sport", ReasonAllow, &Matches{AllowTags: []string{"AI"}, DenyTags: []string{"Sports"}}},
-		{"alien-sport", ReasonAllow, &Matches{DenyTags: []string{"Sports"}, AllowWords: []string{"alien"}}},
-		{"valiente", ReasonDeny, &Matches{DenyWords: []string{"goalscorer"}}},
-		{"musk", ReasonAllow, &Matches{DenyTags: []string{"Elections"}, AllowWords: []string{"elon musk"}}},
-		{"desc", ReasonAllow, &Matches{DenyTags: []string{"Sports"}, AllowWords: []string{"alien"}}},
-		{"cpp", ReasonAllow, &Matches{DenyTags: []string{"Sports"}, AllowWords: []string{"c++"}}},
-		{"both-words", ReasonAllow, &Matches{AllowWords: []string{"alien"}, DenyWords: []string{"goalscorer"}}},
+		{"sport", awesome.ReasonDeny, &awesome.Matches{DenyTags: []string{"Sports"}}},
+		{"case", awesome.ReasonDefault, nil},
+		{"culture", awesome.ReasonDefault, nil},
+		{"ai-sport", awesome.ReasonAllow, &awesome.Matches{AllowTags: []string{"AI"}, DenyTags: []string{"Sports"}}},
+		{"alien-sport", awesome.ReasonAllow, &awesome.Matches{DenyTags: []string{"Sports"}, AllowWords: []string{"alien"}}},
+		{"valiente", awesome.ReasonDeny, &awesome.Matches{DenyWords: []string{"goalscorer"}}},
+		{"musk", awesome.ReasonAllow, &awesome.Matches{DenyTags: []string{"Elections"}, AllowWords: []string{"elon musk"}}},
+		{"desc", awesome.ReasonAllow, &awesome.Matches{DenyTags: []string{"Sports"}, AllowWords: []string{"alien"}}},
+		{"cpp", awesome.ReasonAllow, &awesome.Matches{DenyTags: []string{"Sports"}, AllowWords: []string{"c++"}}},
+		{"both-words", awesome.ReasonAllow, &awesome.Matches{AllowWords: []string{"alien"}, DenyWords: []string{"goalscorer"}}},
 	}
 	for _, tt := range tests {
 		got := readAwesome(t, m, tt.id)
-		if got.Reason != tt.reason || got.IsAwesome != (tt.reason != ReasonDeny) {
+		if got.Reason != tt.reason || got.IsAwesome != (tt.reason != awesome.ReasonDeny) {
 			t.Errorf("%s: reason=%q is_awesome=%v, want %q", tt.id, got.Reason, got.IsAwesome, tt.reason)
 		}
 		if !reflect.DeepEqual(got.Matches, tt.matches) {
@@ -109,7 +111,7 @@ func TestMarkAwesome_FourListsAllowWins(t *testing.T) {
 	if _, err := m.MarkAwesome(ctx, rules); err != nil {
 		t.Fatalf("second MarkAwesome: %v", err)
 	}
-	if got := readAwesome(t, m, "sport"); !got.IsAwesome || got.Reason != ReasonDefault || got.Matches != nil {
+	if got := readAwesome(t, m, "sport"); !got.IsAwesome || got.Reason != awesome.ReasonDefault || got.Matches != nil {
 		t.Errorf("sport after recompute: %+v, want awesome by default without matches", got)
 	}
 
@@ -119,18 +121,6 @@ func TestMarkAwesome_FourListsAllowWins(t *testing.T) {
 	}
 	if total != 9 || open != 9 {
 		t.Errorf("CountAwesome = %d/%d, want 9/9 (only valiente is denied)", total, open)
-	}
-}
-
-func TestWordPattern(t *testing.T) {
-	for word, want := range map[string]string{
-		"alien":     `(?:^|[^\p{L}\p{N}])alien`,
-		"c++":       `(?:^|[^\p{L}\p{N}])c\+\+`,
-		"elon musk": `(?:^|[^\p{L}\p{N}])elon musk`,
-	} {
-		if got := wordPattern(word); got != want {
-			t.Errorf("wordPattern(%q) = %s, want %s", word, got, want)
-		}
 	}
 }
 
@@ -156,5 +146,44 @@ func TestUpsertMarkets_KeepsAwesomeFields(t *testing.T) {
 	}
 	if got.Question != "Aliens? (edited)" || got.LastTrade != 0.7 {
 		t.Errorf("API fields not updated: %+v", got)
+	}
+}
+
+func TestMarkAwesome_RuleValueIsLiteral(t *testing.T) {
+	m := newTestMongo(t)
+	ctx := context.Background()
+	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "1", Question: "Will gas cost $5?"}}, time.Now()); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	// A value starting with "$" would read as a field path without $literal.
+	if _, err := m.MarkAwesome(ctx, FilterRules{DenyWords: []string{"$5"}}); err != nil {
+		t.Fatalf("MarkAwesome: %v", err)
+	}
+	got := readAwesome(t, m, "1")
+	if got.IsAwesome || got.Matches == nil || !reflect.DeepEqual(got.Matches.DenyWords, []string{"$5"}) {
+		t.Errorf("market = %+v, want denied by \"$5\"", got)
+	}
+}
+
+func TestMarkAwesome_FullBatch(t *testing.T) {
+	m := newTestMongo(t)
+	ctx := context.Background()
+	// Exactly one full batch: it is sent from the loop, nothing is left over.
+	markets := make([]polymarket.Market, markBatch)
+	for i := range markets {
+		markets[i] = polymarket.Market{ID: strconv.Itoa(i), Question: "Aliens?"}
+		if i%2 == 0 {
+			markets[i].Question = "Goalscorer?"
+		}
+	}
+	if _, err := m.UpsertMarkets(ctx, markets, time.Now()); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	checked, err := m.MarkAwesome(ctx, FilterRules{DenyWords: []string{"goalscorer"}})
+	if err != nil || checked != markBatch {
+		t.Fatalf("MarkAwesome = %d, %v; want %d", checked, err, markBatch)
+	}
+	if total, _, err := m.CountAwesome(ctx); err != nil || total != markBatch/2 {
+		t.Errorf("CountAwesome = %d, %v; want %d", total, err, markBatch/2)
 	}
 }

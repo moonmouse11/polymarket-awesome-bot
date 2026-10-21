@@ -12,6 +12,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/awesome"
 )
 
 const (
@@ -57,14 +59,8 @@ type RuleChange struct {
 	By     string    `bson:"by,omitempty"`
 }
 
-// FilterRules are the four lists, each sorted.
-type FilterRules struct {
-	AllowTags, DenyTags, AllowWords, DenyWords []string
-}
-
-// Empty reports whether nothing would be filtered out: with no deny rules
-// every market is awesome.
-func (r FilterRules) Empty() bool { return len(r.DenyTags) == 0 && len(r.DenyWords) == 0 }
+// FilterRules are the stored rules, loaded into the domain type.
+type FilterRules = awesome.Rules
 
 // NormalizeRule validates kind and action and cleans the value: tags are
 // trimmed, words are trimmed and lowercased. action "" is allowed (remove).

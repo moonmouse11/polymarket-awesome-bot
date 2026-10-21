@@ -13,6 +13,7 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/rs/zerolog"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/awesome"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/health"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
@@ -103,7 +104,7 @@ func (f *fakeSender) Send(_ context.Context, msg string) (int, error) {
 }
 
 func market(id, question string) db.AwesomeMarket {
-	return db.AwesomeMarket{Market: polymarket.Market{ID: id, Question: question, Slug: id}, Reason: db.ReasonDefault}
+	return db.AwesomeMarket{Market: polymarket.Market{ID: id, Question: question, Slug: id}, Reason: awesome.ReasonDefault}
 }
 
 func newTestNotifier(q Queue, s Sender) *Notifier {
@@ -278,16 +279,16 @@ func TestFormat(t *testing.T) {
 		mk   db.AwesomeMarket
 		want string
 	}{
-		{"allow word overrides a deny tag", db.AwesomeMarket{Market: base, Reason: db.ReasonAllow,
-			Matches: db.Matches{AllowWords: []string{"alien", "ufo"}, DenyTags: []string{"Sports"}}},
+		{"allow word overrides a deny tag", db.AwesomeMarket{Market: base, Reason: awesome.ReasonAllow,
+			Matches: awesome.Matches{AllowWords: []string{"alien", "ufo"}, DenyTags: []string{"Sports"}}},
 			head + "🔑 Allowed by word «alien», «ufo»\n(overrides tag «Sports»)" + tail},
-		{"allow tag and word", db.AwesomeMarket{Market: base, Reason: db.ReasonAllow,
-			Matches: db.Matches{AllowTags: []string{"AI"}, AllowWords: []string{"ufo"}}},
+		{"allow tag and word", db.AwesomeMarket{Market: base, Reason: awesome.ReasonAllow,
+			Matches: awesome.Matches{AllowTags: []string{"AI"}, AllowWords: []string{"ufo"}}},
 			head + "🔑 Allowed by tag «AI», word «ufo»" + tail},
-		{"not filtered", db.AwesomeMarket{Market: base, Reason: db.ReasonDefault},
+		{"not filtered", db.AwesomeMarket{Market: base, Reason: awesome.ReasonDefault},
 			head + "✅ No deny rule matched" + tail},
-		{"filtered out since posted", db.AwesomeMarket{Market: base, Reason: db.ReasonDeny,
-			Matches: db.Matches{DenyTags: []string{"Sports"}, DenyWords: []string{"goalscorer"}}},
+		{"filtered out since posted", db.AwesomeMarket{Market: base, Reason: awesome.ReasonDeny,
+			Matches: awesome.Matches{DenyTags: []string{"Sports"}, DenyWords: []string{"goalscorer"}}},
 			head + "⛔ Denied by tag «Sports», word «goalscorer»" + tail},
 	}
 	for _, tt := range tests {
@@ -299,7 +300,7 @@ func TestFormat(t *testing.T) {
 
 func TestFormat_Description(t *testing.T) {
 	mk := db.AwesomeMarket{Market: polymarket.Market{Question: "Q?", Slug: "q",
-		Description: "  Resolves <Yes> if & only if…\n\nSource: AP.  "}, Reason: db.ReasonDefault}
+		Description: "  Resolves <Yes> if & only if…\n\nSource: AP.  "}, Reason: awesome.ReasonDefault}
 	want := "<b>Q?</b>\n\n<blockquote expandable>Resolves &lt;Yes&gt; if &amp; only if…\n\nSource: AP.</blockquote>\n\n✅ No deny rule matched"
 	if got := Format(mk); !strings.HasPrefix(got, want) {
 		t.Errorf("Format =\n%s\nwant prefix\n%s", got, want)
