@@ -33,6 +33,9 @@ const (
 	markWriters = 2    // bulk writes in flight; 4 is no faster
 )
 
+// removeField as a value in an aggregation $set removes the field.
+const removeField = "$$REMOVE"
+
 // Fields replaced by awesome_matches; a recompute removes them.
 var legacyAwesomeFields = bson.A{"awesome_words", "awesome_excluded_tag"}
 
@@ -62,6 +65,13 @@ type awesomeInput struct {
 	Tags        []string `bson:"tags"`
 }
 
+// verdictGroup is the markets of a batch with the same verdict: they share
+// one update, as there are few distinct verdicts.
+type verdictGroup struct {
+	v   awesome.Verdict
+	ids []string
+}
+
 // markAwesome reads the markets, classifies them and writes the verdicts in
 // batches. Updating the collection while reading it is safe: an update
 // keeps the document's place in the scan.
@@ -75,76 +85,82 @@ func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, rules FilterRu
 	}
 	defer func() { _ = cur.Close(context.Background()) }()
 
-	// Markets of a batch with the same verdict share one update: there are
-	// few distinct verdicts. Batches are written by markWriters goroutines
-	// while the next ones are read: done in turn, reads and writes stall each
-	// other and the recompute is 2x slower than with this overlap.
-	type group struct {
-		v   awesome.Verdict
-		ids []string
-	}
+	// Batches are written by markWriters goroutines while the next ones are
+	// read: done in turn, reads and writes stall each other and the
+	// recompute is 2x slower than with this overlap.
 	g, gctx := errgroup.WithContext(ctx)
-	batches := make(chan map[string]*group)
+	batches := make(chan map[string]*verdictGroup)
 	for range markWriters {
-		g.Go(func() error {
-			for groups := range batches {
-				models := make([]mongo.WriteModel, 0, len(groups))
-				for _, gr := range groups {
-					models = append(models, mongo.NewUpdateManyModel().
-						SetFilter(bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: gr.ids}}}}).
-						SetUpdate(verdictUpdate(gr.v, deletePosted)))
-				}
-				if _, err := coll.BulkWrite(gctx, models, options.BulkWrite().SetOrdered(false)); err != nil {
-					return fmt.Errorf("mark awesome markets: %w", err)
-				}
-			}
-			return nil
-		})
+		g.Go(func() error { return writeVerdicts(gctx, coll, batches, deletePosted) })
 	}
-
 	var checked int64
 	g.Go(func() error {
 		defer close(batches)
-		send := func(groups map[string]*group) error {
-			select {
-			case batches <- groups:
-				return nil
-			case <-gctx.Done():
-				return gctx.Err()
-			}
-		}
-		pending, groups := 0, map[string]*group{}
-		for cur.Next(gctx) {
-			var mk awesomeInput
-			if err := cur.Decode(&mk); err != nil {
-				return fmt.Errorf("decode market: %w", err)
-			}
-			v := awesome.Classify(awesome.Market{Question: mk.Question, EventTitle: mk.EventTitle, Description: mk.Description, Tags: mk.Tags}, rules)
-			key := fmt.Sprintf("%q", v) // %q keeps list boundaries unambiguous
-			gr := groups[key]
-			if gr == nil {
-				gr = &group{v: v}
-				groups[key] = gr
-			}
-			gr.ids = append(gr.ids, mk.ID)
-			checked++
-			if pending++; pending == markBatch {
-				if err := send(groups); err != nil {
-					return err
-				}
-				pending, groups = 0, map[string]*group{}
-			}
-		}
-		if err := cur.Err(); err != nil {
-			return fmt.Errorf("read markets to mark: %w", err)
-		}
-		if pending > 0 {
-			return send(groups)
-		}
-		return nil
+		var err error
+		checked, err = readVerdicts(gctx, cur, rules, batches)
+		return err
 	})
 	err = g.Wait()
 	return checked, err
+}
+
+// readVerdicts classifies the markets of the cursor and sends them to
+// batches, grouped by verdict, markBatch markets at a time.
+func readVerdicts(ctx context.Context, cur *mongo.Cursor, rules FilterRules, batches chan<- map[string]*verdictGroup) (int64, error) {
+	send := func(groups map[string]*verdictGroup) error {
+		select {
+		case batches <- groups:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	var checked int64
+	pending, groups := 0, map[string]*verdictGroup{}
+	for cur.Next(ctx) {
+		var mk awesomeInput
+		if err := cur.Decode(&mk); err != nil {
+			return checked, fmt.Errorf("decode market: %w", err)
+		}
+		v := awesome.Classify(awesome.Market{Question: mk.Question, EventTitle: mk.EventTitle, Description: mk.Description, Tags: mk.Tags}, rules)
+		key := fmt.Sprintf("%q", v) // %q keeps list boundaries unambiguous
+		gr := groups[key]
+		if gr == nil {
+			gr = &verdictGroup{v: v}
+			groups[key] = gr
+		}
+		gr.ids = append(gr.ids, mk.ID)
+		checked++
+		if pending++; pending == markBatch {
+			if err := send(groups); err != nil {
+				return checked, err
+			}
+			pending, groups = 0, map[string]*verdictGroup{}
+		}
+	}
+	if err := cur.Err(); err != nil {
+		return checked, fmt.Errorf("read markets to mark: %w", err)
+	}
+	if pending > 0 {
+		return checked, send(groups)
+	}
+	return checked, nil
+}
+
+// writeVerdicts stores each batch with one bulk write, an update per group.
+func writeVerdicts(ctx context.Context, coll *mongo.Collection, batches <-chan map[string]*verdictGroup, deletePosted bool) error {
+	for groups := range batches {
+		models := make([]mongo.WriteModel, 0, len(groups))
+		for _, gr := range groups {
+			models = append(models, mongo.NewUpdateManyModel().
+				SetFilter(bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: gr.ids}}}}).
+				SetUpdate(verdictUpdate(gr.v, deletePosted)))
+		}
+		if _, err := coll.BulkWrite(ctx, models, options.BulkWrite().SetOrdered(false)); err != nil {
+			return fmt.Errorf("mark awesome markets: %w", err)
+		}
+	}
+	return nil
 }
 
 // verdictUpdate stores a verdict and moves the market between the channel
@@ -152,7 +168,7 @@ func (m *MongoDB) markAwesome(ctx context.Context, filter bson.D, rules FilterRu
 // on the server, so a concurrent write by the notifier is never lost.
 func verdictUpdate(v awesome.Verdict, deletePosted bool) mongo.Pipeline {
 	// $literal: a rule value starting with "$" must not read as a field path.
-	matches := interface{}("$$REMOVE")
+	matches := interface{}(removeField)
 	if !v.Matches.Empty() {
 		matches = bson.D{{Key: "$literal", Value: v.Matches}}
 	}
@@ -171,7 +187,7 @@ func verdictUpdate(v awesome.Verdict, deletePosted bool) mongo.Pipeline {
 			{Key: fieldAwesomeSince, Value: bson.D{{Key: "$cond", Value: bson.A{
 				isAwesome,
 				bson.D{{Key: "$cond", Value: bson.A{wasAwesome, "$" + fieldAwesomeSince, "$$NOW"}}},
-				"$$REMOVE",
+				removeField,
 			}}}},
 			{Key: fieldNotifyPending, Value: bson.D{{Key: "$switch", Value: bson.D{
 				{Key: "branches", Value: bson.A{
@@ -179,7 +195,7 @@ func verdictUpdate(v awesome.Verdict, deletePosted bool) mongo.Pipeline {
 					bson.D{{Key: "case", Value: bson.D{{Key: "$or", Value: bson.A{
 						!isAwesome,
 						bson.D{{Key: "$eq", Value: bson.A{"$closed", true}}},
-					}}}}, {Key: "then", Value: "$$REMOVE"}},
+					}}}}, {Key: "then", Value: removeField}},
 					// Just became awesome and was never announced: enqueue.
 					bson.D{{Key: "case", Value: bson.D{{Key: "$and", Value: bson.A{
 						bson.D{{Key: "$not", Value: bson.A{wasAwesome}}},
@@ -193,7 +209,7 @@ func verdictUpdate(v awesome.Verdict, deletePosted bool) mongo.Pipeline {
 			// recompute only); awesome again before that: keep the message.
 			{Key: fieldDeletePending, Value: bson.D{{Key: "$switch", Value: bson.D{
 				{Key: "branches", Value: bson.A{
-					bson.D{{Key: "case", Value: isAwesome}, {Key: "then", Value: "$$REMOVE"}},
+					bson.D{{Key: "case", Value: isAwesome}, {Key: "then", Value: removeField}},
 					bson.D{{Key: "case", Value: bson.D{{Key: "$and", Value: bson.A{
 						deletePosted,
 						bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$type", Value: "$" + fieldMessageID}}, "missing"}}},
