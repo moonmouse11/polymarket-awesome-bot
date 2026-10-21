@@ -13,6 +13,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/awesome"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/health"
 )
@@ -333,11 +334,11 @@ func reason(mk db.AwesomeMarket) string {
 	m := mk.Matches
 	deny := rules(m.DenyTags, m.DenyWords)
 	switch mk.Reason {
-	case db.ReasonDeny:
+	case awesome.ReasonDeny:
 		// Edits re-render messages: the market may have been filtered out
 		// since it was posted (e.g. its tag became a deny rule).
 		return "⛔ Denied by " + deny
-	case db.ReasonAllow:
+	case awesome.ReasonAllow:
 		r := "🔑 Allowed by " + rules(m.AllowTags, m.AllowWords)
 		if deny != "" {
 			r += "\n(overrides " + deny + ")"
