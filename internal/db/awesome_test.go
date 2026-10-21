@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -161,5 +162,28 @@ func TestMarkAwesome_RuleValueIsLiteral(t *testing.T) {
 	got := readAwesome(t, m, "1")
 	if got.IsAwesome || got.Matches == nil || !reflect.DeepEqual(got.Matches.DenyWords, []string{"$5"}) {
 		t.Errorf("market = %+v, want denied by \"$5\"", got)
+	}
+}
+
+func TestMarkAwesome_FullBatch(t *testing.T) {
+	m := newTestMongo(t)
+	ctx := context.Background()
+	// Exactly one full batch: it is sent from the loop, nothing is left over.
+	markets := make([]polymarket.Market, markBatch)
+	for i := range markets {
+		markets[i] = polymarket.Market{ID: strconv.Itoa(i), Question: "Aliens?"}
+		if i%2 == 0 {
+			markets[i].Question = "Goalscorer?"
+		}
+	}
+	if _, err := m.UpsertMarkets(ctx, markets, time.Now()); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	checked, err := m.MarkAwesome(ctx, FilterRules{DenyWords: []string{"goalscorer"}})
+	if err != nil || checked != markBatch {
+		t.Fatalf("MarkAwesome = %d, %v; want %d", checked, err, markBatch)
+	}
+	if total, _, err := m.CountAwesome(ctx); err != nil || total != markBatch/2 {
+		t.Errorf("CountAwesome = %d, %v; want %d", total, err, markBatch/2)
 	}
 }
