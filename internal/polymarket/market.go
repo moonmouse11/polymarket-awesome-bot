@@ -5,49 +5,9 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
-
-// Market is a Polymarket market as stored in MongoDB.
-// To store another API field: add it to apiMarket (JSON name from the API),
-// add it here (bson name in the DB) and copy it in toMarket.
-type Market struct {
-	ID          string `bson:"_id"`
-	Slug        string `bson:"slug"`
-	ConditionID string `bson:"condition_id"`
-	EventSlug   string `bson:"event_slug,omitempty"`
-	EventTitle  string `bson:"event_title,omitempty"`
-
-	Question    string `bson:"question"`
-	Description string `bson:"description"`
-
-	Active          bool `bson:"active"`
-	Closed          bool `bson:"closed"`
-	Archived        bool `bson:"archived"`
-	AcceptingOrders bool `bson:"accepting_orders"`
-
-	// Closing and resolution: closed is the authoritative flag; resolution
-	// (who won) comes later via the UMA oracle or automatically.
-	ClosedTime            *time.Time `bson:"closed_time,omitempty"`
-	UMAResolutionStatus   string     `bson:"uma_resolution_status,omitempty"` // "", "proposed", "resolved", ...
-	AutomaticallyResolved bool       `bson:"automatically_resolved"`
-
-	CreatedAt *time.Time `bson:"created_at,omitempty"`
-	UpdatedAt *time.Time `bson:"updated_at,omitempty"`
-	StartDate *time.Time `bson:"start_date,omitempty"`
-	EndDate   *time.Time `bson:"end_date,omitempty"`
-
-	Tags []string `bson:"tags"`
-
-	Outcomes       []string  `bson:"outcomes"`
-	OutcomePrices  []float64 `bson:"outcome_prices"`
-	Volume         float64   `bson:"volume"`
-	Volume24h      float64   `bson:"volume_24h"`
-	Liquidity      float64   `bson:"liquidity"`
-	LastTradePrice float64   `bson:"last_trade_price"`
-
-	// SyncedAt is when the bot last wrote this document (set by the DB layer).
-	SyncedAt time.Time `bson:"synced_at"`
-}
 
 // apiMarket mirrors the Gamma API JSON. Only the fields we store are listed.
 type apiMarket struct {
@@ -82,8 +42,8 @@ type apiMarket struct {
 	} `json:"events"`
 }
 
-func (a apiMarket) toMarket() (Market, error) {
-	m := Market{
+func (a apiMarket) toMarket() (domain.Market, error) {
+	m := domain.Market{
 		ID:              a.ID,
 		Slug:            a.Slug,
 		ConditionID:     a.ConditionID,
@@ -117,19 +77,19 @@ func (a apiMarket) toMarket() (Market, error) {
 
 	if a.Outcomes != "" {
 		if err := json.Unmarshal([]byte(a.Outcomes), &m.Outcomes); err != nil {
-			return Market{}, fmt.Errorf("market %s: parse outcomes: %w", a.ID, err)
+			return domain.Market{}, fmt.Errorf("market %s: parse outcomes: %w", a.ID, err)
 		}
 	}
 	if a.OutcomePrices != "" {
 		var prices []string
 		if err := json.Unmarshal([]byte(a.OutcomePrices), &prices); err != nil {
-			return Market{}, fmt.Errorf("market %s: parse outcomePrices: %w", a.ID, err)
+			return domain.Market{}, fmt.Errorf("market %s: parse outcomePrices: %w", a.ID, err)
 		}
 		m.OutcomePrices = make([]float64, 0, len(prices))
 		for _, p := range prices {
 			f, err := strconv.ParseFloat(p, 64)
 			if err != nil {
-				return Market{}, fmt.Errorf("market %s: parse price %q: %w", a.ID, p, err)
+				return domain.Market{}, fmt.Errorf("market %s: parse price %q: %w", a.ID, p, err)
 			}
 			m.OutcomePrices = append(m.OutcomePrices, f)
 		}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 	"github.com/rs/zerolog"
 )
 
@@ -47,8 +48,8 @@ func TestAllMarkets_FollowsCursorAndParses(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	var got []Market
-	err := newTestClient(srv).AllMarkets(context.Background(), true, func(page []Market) error {
+	var got []domain.Market
+	err := newTestClient(srv).AllMarkets(context.Background(), true, func(page []domain.Market) error {
 		got = append(got, page...)
 		return nil
 	})
@@ -215,7 +216,7 @@ func TestRecentlyUpdated_SortsNewestFirstAndStops(t *testing.T) {
 	defer srv.Close()
 
 	pages := 0
-	err := newTestClient(srv).RecentlyUpdated(context.Background(), false, func(page []Market) (bool, error) {
+	err := newTestClient(srv).RecentlyUpdated(context.Background(), false, func(page []domain.Market) (bool, error) {
 		pages++
 		return pages < 3, nil
 	})

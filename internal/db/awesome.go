@@ -10,9 +10,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/awesome"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
-// Fields written by MarkAwesome. They are not part of polymarket.Market, so
+// Fields written by MarkAwesome. They are not part of domain.Market, so
 // the loader's $set never touches them.
 const (
 	fieldIsAwesome        = "is_awesome"
@@ -54,15 +55,6 @@ func (m *MongoDB) MarkAwesomeIDs(ctx context.Context, ids []string, rules Filter
 		return 0, nil
 	}
 	return m.markAwesome(ctx, bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}, rules, false)
-}
-
-// awesomeInput is the part of a market document Classify needs.
-type awesomeInput struct {
-	ID          string   `bson:"_id"`
-	Question    string   `bson:"question"`
-	EventTitle  string   `bson:"event_title"`
-	Description string   `bson:"description"`
-	Tags        []string `bson:"tags"`
 }
 
 // verdictGroup is the markets of a batch with the same verdict: they share
@@ -118,11 +110,11 @@ func readVerdicts(ctx context.Context, cur *mongo.Cursor, rules FilterRules, bat
 	var checked int64
 	pending, groups := 0, map[string]*verdictGroup{}
 	for cur.Next(ctx) {
-		var mk awesomeInput
+		var mk domain.Market
 		if err := cur.Decode(&mk); err != nil {
 			return checked, fmt.Errorf("decode market: %w", err)
 		}
-		v := awesome.Classify(awesome.Market{Question: mk.Question, EventTitle: mk.EventTitle, Description: mk.Description, Tags: mk.Tags}, rules)
+		v := awesome.Classify(mk, rules)
 		key := fmt.Sprintf("%q", v) // %q keeps list boundaries unambiguous
 		gr := groups[key]
 		if gr == nil {

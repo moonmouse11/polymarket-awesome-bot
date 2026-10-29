@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
 	"github.com/rs/zerolog"
@@ -26,12 +27,12 @@ const (
 
 // MarketLister is the Polymarket API (implemented by *polymarket.Client).
 type MarketLister interface {
-	AllMarkets(ctx context.Context, closed bool, fn func(page []polymarket.Market) error) error
+	AllMarkets(ctx context.Context, closed bool, fn func(page []domain.Market) error) error
 }
 
 // Upserter is MongoDB (implemented by *db.MongoDB).
 type Upserter interface {
-	UpsertMarkets(ctx context.Context, markets []polymarket.Market, syncedAt time.Time) (int, error)
+	UpsertMarkets(ctx context.Context, markets []domain.Market, syncedAt time.Time) (int, error)
 }
 
 func main() {
@@ -110,11 +111,11 @@ func loadPass(ctx context.Context, log zerolog.Logger, client MarketLister, stor
 
 	// Writer failure cancels gctx and stops the fetcher, and vice versa.
 	g, gctx := errgroup.WithContext(ctx)
-	pageCh := make(chan []polymarket.Market, pageBuffer)
+	pageCh := make(chan []domain.Market, pageBuffer)
 
 	g.Go(func() error {
 		defer close(pageCh)
-		return client.AllMarkets(gctx, closed, func(page []polymarket.Market) error {
+		return client.AllMarkets(gctx, closed, func(page []domain.Market) error {
 			select {
 			case pageCh <- page:
 				return nil

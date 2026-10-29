@@ -13,7 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 func TestParseExport(t *testing.T) {
@@ -138,7 +138,7 @@ func TestRun_RestoresPostsInMongo(t *testing.T) {
 		t.Fatalf("NewMongoDB: %v", err)
 	}
 	t.Cleanup(func() { _ = m.Close(context.Background()) })
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "ufo-id", Slug: "ufo-2027"}}, time.Now()); err != nil {
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{{ID: "ufo-id", Slug: "ufo-2027"}}, time.Now()); err != nil {
 		t.Fatalf("UpsertMarkets: %v", err)
 	}
 

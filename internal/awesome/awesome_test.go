@@ -3,6 +3,8 @@ package awesome
 import (
 	"reflect"
 	"testing"
+
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 func TestClassify(t *testing.T) {
@@ -14,28 +16,28 @@ func TestClassify(t *testing.T) {
 	}
 	tests := []struct {
 		name    string
-		market  Market
+		market  domain.Market
 		reason  string
 		matches Matches
 	}{
-		{"deny tag", Market{Question: "O/U 2.5 goals?", Tags: []string{"Sports", "Soccer"}}, ReasonDeny, Matches{DenyTags: []string{"Sports"}}},
-		{"tags match exactly", Market{Tags: []string{"sports"}}, ReasonDefault, Matches{}},
-		{"no rule", Market{Question: "Best picture?", Tags: []string{"Culture"}}, ReasonDefault, Matches{}},
-		{"allow tag beats deny tag", Market{Tags: []string{"Sports", "AI"}}, ReasonAllow, Matches{AllowTags: []string{"AI"}, DenyTags: []string{"Sports"}}},
-		{"allow word beats deny tag", Market{Question: "Aliens at the Super Bowl?", Tags: []string{"Sports"}}, ReasonAllow,
+		{"deny tag", domain.Market{Question: "O/U 2.5 goals?", Tags: []string{"Sports", "Soccer"}}, ReasonDeny, Matches{DenyTags: []string{"Sports"}}},
+		{"tags match exactly", domain.Market{Tags: []string{"sports"}}, ReasonDefault, Matches{}},
+		{"no rule", domain.Market{Question: "Best picture?", Tags: []string{"Culture"}}, ReasonDefault, Matches{}},
+		{"allow tag beats deny tag", domain.Market{Tags: []string{"Sports", "AI"}}, ReasonAllow, Matches{AllowTags: []string{"AI"}, DenyTags: []string{"Sports"}}},
+		{"allow word beats deny tag", domain.Market{Question: "Aliens at the Super Bowl?", Tags: []string{"Sports"}}, ReasonAllow,
 			Matches{DenyTags: []string{"Sports"}, AllowWords: []string{"alien"}}},
-		{"word inside a word does not match", Market{Question: "Joaquín Valiente: Anytime Goalscorer"}, ReasonDeny, Matches{DenyWords: []string{"goalscorer"}}},
-		{"phrase, any case, event title", Market{EventTitle: "ELON MUSK tweets", Tags: []string{"Elections"}}, ReasonAllow,
+		{"word inside a word does not match", domain.Market{Question: "Joaquín Valiente: Anytime Goalscorer"}, ReasonDeny, Matches{DenyWords: []string{"goalscorer"}}},
+		{"phrase, any case, event title", domain.Market{EventTitle: "ELON MUSK tweets", Tags: []string{"Elections"}}, ReasonAllow,
 			Matches{DenyTags: []string{"Elections"}, AllowWords: []string{"elon musk"}}},
-		{"description, after punctuation", Market{Description: "Resolves Yes if (alien) life is found."}, ReasonAllow, Matches{AllowWords: []string{"alien"}}},
-		{"special characters are literal", Market{Question: "Is C++ dead?"}, ReasonAllow, Matches{AllowWords: []string{"c++"}}},
-		{"allow word beats deny word", Market{Question: "Alien goalscorer?"}, ReasonAllow, Matches{AllowWords: []string{"alien"}, DenyWords: []string{"goalscorer"}}},
-		{"second occurrence at a word start", Market{Question: "Valiente vs alien"}, ReasonAllow, Matches{AllowWords: []string{"alien"}}},
-		{"word in tags", Market{Tags: []string{"Alien Life"}}, ReasonAllow, Matches{AllowWords: []string{"alien"}}},
+		{"description, after punctuation", domain.Market{Description: "Resolves Yes if (alien) life is found."}, ReasonAllow, Matches{AllowWords: []string{"alien"}}},
+		{"special characters are literal", domain.Market{Question: "Is C++ dead?"}, ReasonAllow, Matches{AllowWords: []string{"c++"}}},
+		{"allow word beats deny word", domain.Market{Question: "Alien goalscorer?"}, ReasonAllow, Matches{AllowWords: []string{"alien"}, DenyWords: []string{"goalscorer"}}},
+		{"second occurrence at a word start", domain.Market{Question: "Valiente vs alien"}, ReasonAllow, Matches{AllowWords: []string{"alien"}}},
+		{"word in tags", domain.Market{Tags: []string{"Alien Life"}}, ReasonAllow, Matches{AllowWords: []string{"alien"}}},
 		// Non-ASCII letters match in any case (MongoDB's $toLower handled ASCII only).
-		{"non-ASCII any case", Market{Question: "Ракета долетит до Марса?"}, ReasonAllow, Matches{AllowWords: []string{"ракета"}}},
-		{"non-ASCII letter before is a word", Market{Question: "суперракета"}, ReasonDefault, Matches{}},
-		{"any Unicode number before is a word", Market{Question: "x²alien 2alien"}, ReasonDefault, Matches{}},
+		{"non-ASCII any case", domain.Market{Question: "Ракета долетит до Марса?"}, ReasonAllow, Matches{AllowWords: []string{"ракета"}}},
+		{"non-ASCII letter before is a word", domain.Market{Question: "суперракета"}, ReasonDefault, Matches{}},
+		{"any Unicode number before is a word", domain.Market{Question: "x²alien 2alien"}, ReasonDefault, Matches{}},
 	}
 	for _, tt := range tests {
 		v := Classify(tt.market, rules)

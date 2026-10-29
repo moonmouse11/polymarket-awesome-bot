@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 const marketsCollection = "markets"
@@ -71,7 +71,7 @@ func (m *MongoDB) EnsureMarketIndexes(ctx context.Context) error {
 // Polymarket, and an open copy can only be stale (fetched before it closed,
 // e.g. by the open-markets pass running in parallel with the closed one).
 // It returns how many such stale open copies were skipped.
-func (m *MongoDB) UpsertMarkets(ctx context.Context, markets []polymarket.Market, syncedAt time.Time) (skipped int, err error) {
+func (m *MongoDB) UpsertMarkets(ctx context.Context, markets []domain.Market, syncedAt time.Time) (skipped int, err error) {
 	if len(markets) == 0 {
 		return 0, nil
 	}
@@ -107,7 +107,7 @@ func (m *MongoDB) UpsertMarkets(ctx context.Context, markets []polymarket.Market
 
 // setFields converts a market to the fields of a $set update. _id is left out:
 // it comes from the filter and cannot be changed.
-func setFields(mk polymarket.Market) (bson.D, error) {
+func setFields(mk domain.Market) (bson.D, error) {
 	raw, err := bson.Marshal(mk)
 	if err != nil {
 		return nil, fmt.Errorf("marshal market %s: %w", mk.ID, err)

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 // Every query returns its error instead of a zero result: callers rely on
@@ -17,7 +17,7 @@ func TestMongoDB_ErrorsArePropagated(t *testing.T) {
 	cancel() // every query fails at once
 
 	rules := FilterRules{DenyTags: []string{"Sports"}}
-	markets := []polymarket.Market{{ID: "1"}}
+	markets := []domain.Market{{ID: "1"}}
 	now := time.Now()
 	for name, call := range map[string]func() error{
 		"EnsureMarketIndexes": func() error { return m.EnsureMarketIndexes(ctx) },
@@ -58,7 +58,7 @@ func TestMongoDB_ErrorsArePropagated(t *testing.T) {
 func TestTagInUse(t *testing.T) {
 	m := newTestMongo(t)
 	ctx := context.Background()
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "1", Tags: []string{"Science"}}}, time.Now()); err != nil {
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{{ID: "1", Tags: []string{"Science"}}}, time.Now()); err != nil {
 		t.Fatalf("UpsertMarkets: %v", err)
 	}
 	for tag, want := range map[string]bool{"Science": true, "science": false, "Sports": false} {

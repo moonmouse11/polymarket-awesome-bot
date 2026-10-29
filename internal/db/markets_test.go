@@ -7,7 +7,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 func TestUpsertMarkets_ReloadDoesNotDuplicate(t *testing.T) {
@@ -19,7 +19,7 @@ func TestUpsertMarkets_ReloadDoesNotDuplicate(t *testing.T) {
 		t.Fatalf("EnsureMarketIndexes: %v", err)
 	}
 
-	first := []polymarket.Market{
+	first := []domain.Market{
 		{ID: "1", Question: "Aliens?", OutcomePrices: []float64{0.1, 0.9}},
 		{ID: "2", Question: "UFO?"},
 	}
@@ -28,7 +28,7 @@ func TestUpsertMarkets_ReloadDoesNotDuplicate(t *testing.T) {
 	}
 
 	// Second load: market 1 changed, market 2 is the same, market 3 is new.
-	second := []polymarket.Market{
+	second := []domain.Market{
 		{ID: "1", Question: "Aliens?", Closed: true, OutcomePrices: []float64{0.0, 1.0}},
 		{ID: "2", Question: "UFO?"},
 		{ID: "3", Question: "Matrix?"},
@@ -45,7 +45,7 @@ func TestUpsertMarkets_ReloadDoesNotDuplicate(t *testing.T) {
 		t.Fatalf("count = %d, want 3", count)
 	}
 
-	var got polymarket.Market
+	var got domain.Market
 	if err := coll.FindOne(ctx, bson.D{{Key: "_id", Value: "1"}}).Decode(&got); err != nil {
 		t.Fatalf("find market 1: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestUpsertMarkets_ClosedWins(t *testing.T) {
 	coll := m.db.Collection(marketsCollection)
 
 	// The closed pass has already stored market 1 as closed.
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{
 		{ID: "1", Question: "Aliens?", Closed: true},
 	}, time.Now()); err != nil {
 		t.Fatalf("closed upsert: %v", err)
@@ -68,7 +68,7 @@ func TestUpsertMarkets_ClosedWins(t *testing.T) {
 
 	// The open pass arrives later with a stale open copy of market 1
 	// and a genuinely open market 2 in the same batch.
-	skipped, err := m.UpsertMarkets(ctx, []polymarket.Market{
+	skipped, err := m.UpsertMarkets(ctx, []domain.Market{
 		{ID: "1", Question: "Aliens? (stale)"},
 		{ID: "2", Question: "UFO?"},
 	}, time.Now())
@@ -79,7 +79,7 @@ func TestUpsertMarkets_ClosedWins(t *testing.T) {
 		t.Fatalf("skipped = %d, want 1", skipped)
 	}
 
-	var got polymarket.Market
+	var got domain.Market
 	if err := coll.FindOne(ctx, bson.D{{Key: "_id", Value: "1"}}).Decode(&got); err != nil {
 		t.Fatalf("find market 1: %v", err)
 	}
