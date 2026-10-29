@@ -7,6 +7,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 // Rules are the four lists, each sorted.
@@ -40,12 +42,6 @@ func (m Matches) Empty() bool {
 	return len(m.AllowTags)+len(m.DenyTags)+len(m.AllowWords)+len(m.DenyWords) == 0
 }
 
-// Market is the part of a market the rules look at.
-type Market struct {
-	Question, EventTitle, Description string
-	Tags                              []string
-}
-
 // Verdict is the decision for one market.
 type Verdict struct {
 	Reason  string
@@ -63,7 +59,7 @@ func (v Verdict) Awesome() bool { return v.Reason != ReasonDeny }
 // Tags match exactly. Words match at the start of a word, any case, in the
 // question, event title, description and tags: "alien" matches "Aliens",
 // not "Valiente". Lists keep their order.
-func Classify(m Market, r Rules) Verdict {
+func Classify(m domain.Market, r Rules) Verdict {
 	text := strings.ToLower(m.Question + " " + m.EventTitle + " " + m.Description + " " + strings.Join(m.Tags, " "))
 	v := Verdict{Matches: Matches{
 		AllowTags:  tagsFound(r.AllowTags, m.Tags),

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 func TestStats(t *testing.T) {
@@ -17,7 +17,7 @@ func TestStats(t *testing.T) {
 
 	now := time.Now().UTC()
 	recent, old := now.Add(-time.Hour), now.Add(-48*time.Hour)
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{
 		{ID: "new", Question: "UFO?", CreatedAt: &recent, UpdatedAt: &recent},
 		{ID: "old", Question: "Old?", CreatedAt: &old, UpdatedAt: &recent, Tags: []string{"Sports"}},
 		{ID: "stale", Question: "Stale?", CreatedAt: &old, UpdatedAt: &old, Closed: true},

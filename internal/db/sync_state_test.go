@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 func TestSyncState_SaveAndGet(t *testing.T) {
@@ -43,7 +43,7 @@ func TestMaxUpdatedAt(t *testing.T) {
 	}
 
 	at := func(h int) *time.Time { t := time.Date(2026, 10, 9, h, 0, 0, 0, time.UTC); return &t }
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{
 		{ID: "1", UpdatedAt: at(1)},
 		{ID: "2", UpdatedAt: at(3)},
 		{ID: "3", UpdatedAt: at(5), Closed: true}, // newer, but closed
@@ -62,7 +62,7 @@ func TestMarkAwesomeIDs_OnlyGivenMarkets(t *testing.T) {
 	m := newTestMongo(t)
 	ctx := context.Background()
 
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{
 		{ID: "a", Tags: []string{"Culture"}},
 		{ID: "b", Tags: []string{"Culture"}},
 	}, time.Now()); err != nil {

@@ -8,7 +8,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 func pendingIDs(t *testing.T, m *MongoDB) []string {
@@ -36,7 +36,7 @@ func TestNotifications_QueueFollowsTransitions(t *testing.T) {
 
 	// Already awesome before notifications existed (no awesome_since):
 	// must not be announced.
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "old", Question: "Aliens?"}}, time.Now()); err != nil {
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{{ID: "old", Question: "Aliens?"}}, time.Now()); err != nil {
 		t.Fatalf("upsert old: %v", err)
 	}
 	if _, err := m.db.Collection(marketsCollection).UpdateOne(ctx, bson.D{{Key: "_id", Value: "old"}},
@@ -44,7 +44,7 @@ func TestNotifications_QueueFollowsTransitions(t *testing.T) {
 		t.Fatalf("seed old: %v", err)
 	}
 
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{
 		{ID: "new", Question: "UFO?"},                                 // new and awesome
 		{ID: "sport", Question: "Goals?", Tags: []string{"Sports"}},   // new, not awesome
 		{ID: "closed", Question: "Matrix?", Closed: true},             // awesome but closed
@@ -81,7 +81,7 @@ func TestNotifications_QueueFollowsTransitions(t *testing.T) {
 	if err := m.db.Collection(marketsCollection).FindOne(ctx, bson.D{{Key: "_id", Value: "new"}}).Decode(&msg); err != nil || msg.ID != 42 {
 		t.Fatalf("telegram_message_id = %d, %v; want 42", msg.ID, err)
 	}
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "new", Question: "UFO?", Tags: []string{"Science"}}}, time.Now()); err != nil {
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{{ID: "new", Question: "UFO?", Tags: []string{"Science"}}}, time.Now()); err != nil {
 		t.Fatalf("upsert new: %v", err)
 	}
 	if _, err := m.MarkAwesome(ctx, FilterRules{DenyTags: []string{"Sports", "Science"}, AllowWords: []string{"zombie"}}); err != nil { // "new" is off
@@ -95,7 +95,7 @@ func TestNotifications_QueueFollowsTransitions(t *testing.T) {
 	}
 
 	// Closing before the notification is sent drops it from the queue.
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "later", Question: "Zombies?", Tags: []string{"Sports"}, Closed: true}}, time.Now()); err != nil {
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{{ID: "later", Question: "Zombies?", Tags: []string{"Sports"}, Closed: true}}, time.Now()); err != nil {
 		t.Fatalf("upsert later closed: %v", err)
 	}
 	if _, err := m.MarkAwesomeIDs(ctx, []string{"later"}, withZombie); err != nil {
@@ -126,7 +126,7 @@ func TestNotifications_EditQueue(t *testing.T) {
 	if err := m.EnsureMarketIndexes(ctx); err != nil {
 		t.Fatalf("EnsureMarketIndexes: %v", err)
 	}
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "a", Question: "A?"}, {ID: "b", Question: "B?"}}, time.Now()); err != nil {
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{{ID: "a", Question: "A?"}, {ID: "b", Question: "B?"}}, time.Now()); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	if err := m.MarkNotified(ctx, "a", time.Now(), 7); err != nil {
@@ -174,7 +174,7 @@ func TestNotifications_DeleteQueueAndRepost(t *testing.T) {
 	none := FilterRules{DenyTags: []string{"Weather"}}
 	soccer := FilterRules{DenyTags: []string{"Soccer"}}
 
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{
 		{ID: "goal", Question: "Goals?", Tags: []string{"Soccer"}},                 // posted, then denied
 		{ID: "unposted", Question: "Corners?", Tags: []string{"Soccer"}},           // denied, never posted
 		{ID: "ufo", Question: "UFO?", Tags: []string{"Science"}},                   // posted, stays awesome
@@ -254,7 +254,7 @@ func TestNotifications_DeleteQueueAndRepost(t *testing.T) {
 func TestRestoreNotified(t *testing.T) {
 	m := newTestMongo(t)
 	ctx := context.Background()
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "1", Slug: "ufo", Question: "UFO?"}}, time.Now()); err != nil {
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{{ID: "1", Slug: "ufo", Question: "UFO?"}}, time.Now()); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	if _, err := m.MarkAwesome(ctx, FilterRules{DenyTags: []string{"Sports"}}); err != nil {

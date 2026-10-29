@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 	"github.com/rs/zerolog"
 )
 
@@ -22,10 +22,10 @@ type fakeSource struct {
 	stopErr error // what fn returned when the source stopped
 }
 
-func (f *fakeSource) AllMarkets(_ context.Context, closed bool, fn func(page []polymarket.Market) error) error {
+func (f *fakeSource) AllMarkets(_ context.Context, closed bool, fn func(page []domain.Market) error) error {
 	f.closed = closed
 	for i := 0; f.endless || i < f.pages; i++ {
-		if err := fn([]polymarket.Market{{ID: "m"}}); err != nil {
+		if err := fn([]domain.Market{{ID: "m"}}); err != nil {
 			f.stopErr = err
 			return err
 		}
@@ -35,11 +35,11 @@ func (f *fakeSource) AllMarkets(_ context.Context, closed bool, fn func(page []p
 
 type fakeStore struct {
 	mu      sync.Mutex
-	written []polymarket.Market
+	written []domain.Market
 	err     error
 }
 
-func (f *fakeStore) UpsertMarkets(_ context.Context, markets []polymarket.Market, _ time.Time) (int, error) {
+func (f *fakeStore) UpsertMarkets(_ context.Context, markets []domain.Market, _ time.Time) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {

@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/awesome"
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 // awesomeState is what MarkAwesome writes, read back from a market document.
@@ -40,7 +40,7 @@ func TestMarkAwesome_FourListsAllowWins(t *testing.T) {
 	m := newTestMongo(t)
 	ctx := context.Background()
 
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{
 		{ID: "sport", Question: "O/U 2.5 goals?", Tags: []string{"Sports", "Soccer"}},
 		{ID: "case", Tags: []string{"sports"}}, // tags match exactly
 		{ID: "culture", Question: "Best picture?", Tags: []string{"Culture"}},
@@ -128,7 +128,7 @@ func TestUpsertMarkets_KeepsAwesomeFields(t *testing.T) {
 	m := newTestMongo(t)
 	ctx := context.Background()
 
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "1", Question: "Aliens?"}}, time.Now()); err != nil {
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{{ID: "1", Question: "Aliens?"}}, time.Now()); err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
 	if _, err := m.MarkAwesome(ctx, FilterRules{}); err != nil {
@@ -136,7 +136,7 @@ func TestUpsertMarkets_KeepsAwesomeFields(t *testing.T) {
 	}
 
 	// A reload brings fresh API data; the awesome flag must survive.
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "1", Question: "Aliens? (edited)", LastTradePrice: 0.7}}, time.Now()); err != nil {
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{{ID: "1", Question: "Aliens? (edited)", LastTradePrice: 0.7}}, time.Now()); err != nil {
 		t.Fatalf("second upsert: %v", err)
 	}
 
@@ -152,7 +152,7 @@ func TestUpsertMarkets_KeepsAwesomeFields(t *testing.T) {
 func TestMarkAwesome_RuleValueIsLiteral(t *testing.T) {
 	m := newTestMongo(t)
 	ctx := context.Background()
-	if _, err := m.UpsertMarkets(ctx, []polymarket.Market{{ID: "1", Question: "Will gas cost $5?"}}, time.Now()); err != nil {
+	if _, err := m.UpsertMarkets(ctx, []domain.Market{{ID: "1", Question: "Will gas cost $5?"}}, time.Now()); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	// A value starting with "$" would read as a field path without $literal.
@@ -169,9 +169,9 @@ func TestMarkAwesome_FullBatch(t *testing.T) {
 	m := newTestMongo(t)
 	ctx := context.Background()
 	// Exactly one full batch: it is sent from the loop, nothing is left over.
-	markets := make([]polymarket.Market, markBatch)
+	markets := make([]domain.Market, markBatch)
 	for i := range markets {
-		markets[i] = polymarket.Market{ID: strconv.Itoa(i), Question: "Aliens?"}
+		markets[i] = domain.Market{ID: strconv.Itoa(i), Question: "Aliens?"}
 		if i%2 == 0 {
 			markets[i].Question = "Goalscorer?"
 		}

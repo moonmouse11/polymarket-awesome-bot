@@ -11,7 +11,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 const (
@@ -34,7 +34,7 @@ var ErrNoDenyRules = errors.New("no deny rules in filter_rules, market updates a
 
 // UpdateLister is the Polymarket API (implemented by *polymarket.Client).
 type UpdateLister interface {
-	RecentlyUpdated(ctx context.Context, closed bool, fn func(page []polymarket.Market) (bool, error)) error
+	RecentlyUpdated(ctx context.Context, closed bool, fn func(page []domain.Market) (bool, error)) error
 }
 
 // Store is MongoDB (implemented by *db.MongoDB).
@@ -42,7 +42,7 @@ type Store interface {
 	GetSyncState(ctx context.Context, id string) (*db.SyncState, error)
 	SaveSyncState(ctx context.Context, st db.SyncState) error
 	MaxUpdatedAt(ctx context.Context, closed bool) (time.Time, bool, error)
-	UpsertMarkets(ctx context.Context, markets []polymarket.Market, syncedAt time.Time) (int, error)
+	UpsertMarkets(ctx context.Context, markets []domain.Market, syncedAt time.Time) (int, error)
 	FilterRules(ctx context.Context) (db.FilterRules, error)
 	MarkAwesomeIDs(ctx context.Context, ids []string, rules db.FilterRules) (int64, error)
 }
@@ -187,9 +187,9 @@ func (u *Updater) pass(ctx context.Context, closed bool) (int, error) {
 
 	newest := watermark
 	total, pages := 0, 0
-	err = u.src.RecentlyUpdated(ctx, closed, func(page []polymarket.Market) (bool, error) {
+	err = u.src.RecentlyUpdated(ctx, closed, func(page []domain.Market) (bool, error) {
 		pages++
-		fresh := make([]polymarket.Market, 0, len(page))
+		fresh := make([]domain.Market, 0, len(page))
 		more := true
 		for _, mk := range page {
 			// Newest first: the first market older than the range ends the walk.

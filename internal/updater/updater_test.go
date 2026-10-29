@@ -10,7 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 )
 
 var base = time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
@@ -19,12 +19,12 @@ func at(d time.Duration) *time.Time { t := base.Add(d); return &t }
 
 // fakeSource serves fixed pages, newest first, like the API.
 type fakeSource struct {
-	pages [][]polymarket.Market
+	pages [][]domain.Market
 	err   error
 	asked int // pages handed out
 }
 
-func (f *fakeSource) RecentlyUpdated(_ context.Context, _ bool, fn func([]polymarket.Market) (bool, error)) error {
+func (f *fakeSource) RecentlyUpdated(_ context.Context, _ bool, fn func([]domain.Market) (bool, error)) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -80,7 +80,7 @@ func (f *fakeStore) MaxUpdatedAt(context.Context, bool) (time.Time, bool, error)
 	return f.maxUpdated, !f.maxUpdated.IsZero(), f.maxErr
 }
 
-func (f *fakeStore) UpsertMarkets(_ context.Context, ms []polymarket.Market, _ time.Time) (int, error) {
+func (f *fakeStore) UpsertMarkets(_ context.Context, ms []domain.Market, _ time.Time) (int, error) {
 	for _, m := range ms {
 		f.upserted = append(f.upserted, m.ID)
 	}
@@ -104,7 +104,7 @@ func TestPass_BootstrapsFromDBAndStopsAtOverlap(t *testing.T) {
 	store := newFakeStore()
 	store.maxUpdated = base // newest market from the full load
 
-	src := &fakeSource{pages: [][]polymarket.Market{
+	src := &fakeSource{pages: [][]domain.Market{
 		{{ID: "new1", UpdatedAt: at(10 * time.Minute)}, {ID: "new2", UpdatedAt: at(5 * time.Minute)}},
 		// -1m is inside the 2-minute overlap, -3m is older: the walk stops there.
 		{{ID: "overlap", UpdatedAt: at(-time.Minute)}, {ID: "old", UpdatedAt: at(-3 * time.Minute)}},
@@ -136,7 +136,7 @@ func TestPass_NoDenyRulesPausesUpdates(t *testing.T) {
 	store.rules = db.FilterRules{AllowTags: []string{"AI"}} // allow rules alone filter nothing
 	store.state["markets_open"] = db.SyncState{ID: "markets_open", Watermark: base}
 
-	src := &fakeSource{pages: [][]polymarket.Market{{{ID: "new", UpdatedAt: at(time.Minute)}}}}
+	src := &fakeSource{pages: [][]domain.Market{{{ID: "new", UpdatedAt: at(time.Minute)}}}}
 	if _, err := newTestUpdater(src, store).pass(context.Background(), false); !errors.Is(err, ErrNoDenyRules) {
 		t.Fatalf("pass error = %v, want ErrNoDenyRules", err)
 	}
@@ -153,7 +153,7 @@ func TestPass_UsesStoredWatermark(t *testing.T) {
 	store.maxUpdated = base.Add(-24 * time.Hour) // must be ignored
 	store.state["markets_closed"] = db.SyncState{ID: "markets_closed", Watermark: base}
 
-	src := &fakeSource{pages: [][]polymarket.Market{
+	src := &fakeSource{pages: [][]domain.Market{
 		{{ID: "a", UpdatedAt: at(time.Minute)}, {ID: "b", UpdatedAt: at(-10 * time.Minute)}},
 	}}
 	if _, err := newTestUpdater(src, store).pass(context.Background(), true); err != nil {
@@ -181,7 +181,7 @@ func TestPass_NoUpdatesKeepsWatermark(t *testing.T) {
 	store := newFakeStore()
 	store.state["markets_open"] = db.SyncState{ID: "markets_open", Watermark: base}
 
-	src := &fakeSource{pages: [][]polymarket.Market{{{ID: "old", UpdatedAt: at(-time.Hour)}}}}
+	src := &fakeSource{pages: [][]domain.Market{{{ID: "old", UpdatedAt: at(-time.Hour)}}}}
 	if _, err := newTestUpdater(src, store).pass(context.Background(), false); err != nil {
 		t.Fatalf("pass: %v", err)
 	}
@@ -286,7 +286,7 @@ func (f *fakeReporter) Cycle(markets int, _ time.Duration, _ bool, err error) {
 func TestRun_ReportsCycles(t *testing.T) {
 	store := newFakeStore()
 	store.maxUpdated = base
-	src := &fakeSource{pages: [][]polymarket.Market{{{ID: "a", UpdatedAt: at(time.Minute)}}}}
+	src := &fakeSource{pages: [][]domain.Market{{{ID: "a", UpdatedAt: at(time.Minute)}}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	rep := &fakeReporter{}
 	rep.onCycle = func() {
@@ -309,7 +309,7 @@ func TestRun_ReportsCycles(t *testing.T) {
 
 func TestPass_StoreErrors(t *testing.T) {
 	dbDown := errors.New("mongo down")
-	page := &fakeSource{pages: [][]polymarket.Market{{{ID: "m", UpdatedAt: at(time.Minute)}}}}
+	page := &fakeSource{pages: [][]domain.Market{{{ID: "m", UpdatedAt: at(time.Minute)}}}}
 	for name, set := range map[string]func(*fakeStore){
 		"get state": func(f *fakeStore) { f.getErr = dbDown },
 		"max":       func(f *fakeStore) { f.maxErr = dbDown },
@@ -329,7 +329,7 @@ func TestPass_StoreErrors(t *testing.T) {
 
 func TestPass_EmptyDBStartsFromNow(t *testing.T) {
 	store := newFakeStore()
-	src := &fakeSource{pages: [][]polymarket.Market{{{ID: "old", UpdatedAt: at(0)}}}}
+	src := &fakeSource{pages: [][]domain.Market{{{ID: "old", UpdatedAt: at(0)}}}}
 	if _, err := newTestUpdater(src, store).pass(context.Background(), true); err != nil {
 		t.Fatalf("pass: %v", err)
 	}

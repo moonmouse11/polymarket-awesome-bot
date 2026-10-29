@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 	"github.com/rs/zerolog"
 )
 
@@ -44,12 +45,12 @@ type keysetPage struct {
 // MarketsPage returns one page of markets from /markets/keyset and the cursor
 // for the next page ("" when this was the last page). The API never mixes
 // statuses: closed=false returns only open markets, closed=true only closed.
-func (c *Client) MarketsPage(ctx context.Context, closed bool, cursor string) ([]Market, string, error) {
+func (c *Client) MarketsPage(ctx context.Context, closed bool, cursor string) ([]domain.Market, string, error) {
 	return c.marketsPage(ctx, closed, cursor, false)
 }
 
 // marketsPage fetches one keyset page; newestFirst sorts by updatedAt, newest first.
-func (c *Client) marketsPage(ctx context.Context, closed bool, cursor string, newestFirst bool) ([]Market, string, error) {
+func (c *Client) marketsPage(ctx context.Context, closed bool, cursor string, newestFirst bool) ([]domain.Market, string, error) {
 	q := url.Values{}
 	q.Set("limit", fmt.Sprint(pageLimit))
 	q.Set("include_tag", "true")
@@ -67,7 +68,7 @@ func (c *Client) marketsPage(ctx context.Context, closed bool, cursor string, ne
 		return nil, "", err
 	}
 
-	markets := make([]Market, 0, len(page.Markets))
+	markets := make([]domain.Market, 0, len(page.Markets))
 	for _, a := range page.Markets {
 		m, err := a.toMarket()
 		if err != nil {
@@ -86,8 +87,8 @@ func (c *Client) marketsPage(ctx context.Context, closed bool, cursor string, ne
 // AllMarkets walks every page of open (closed=false) or closed (closed=true)
 // markets and passes each page to fn. It stops on the first error from the
 // API or from fn.
-func (c *Client) AllMarkets(ctx context.Context, closed bool, fn func(page []Market) error) error {
-	return c.walk(ctx, closed, false, func(page []Market) (bool, error) {
+func (c *Client) AllMarkets(ctx context.Context, closed bool, fn func(page []domain.Market) error) error {
+	return c.walk(ctx, closed, false, func(page []domain.Market) (bool, error) {
 		return true, fn(page)
 	})
 }
@@ -95,11 +96,11 @@ func (c *Client) AllMarkets(ctx context.Context, closed bool, fn func(page []Mar
 // RecentlyUpdated walks open or closed markets from the most recently updated
 // backwards and passes each page to fn until fn returns more=false, the pages
 // run out, or an error occurs.
-func (c *Client) RecentlyUpdated(ctx context.Context, closed bool, fn func(page []Market) (more bool, err error)) error {
+func (c *Client) RecentlyUpdated(ctx context.Context, closed bool, fn func(page []domain.Market) (more bool, err error)) error {
 	return c.walk(ctx, closed, true, fn)
 }
 
-func (c *Client) walk(ctx context.Context, closed, newestFirst bool, fn func(page []Market) (bool, error)) error {
+func (c *Client) walk(ctx context.Context, closed, newestFirst bool, fn func(page []domain.Market) (bool, error)) error {
 	cursor := ""
 	for pageNum := 1; ; pageNum++ {
 		started := time.Now()

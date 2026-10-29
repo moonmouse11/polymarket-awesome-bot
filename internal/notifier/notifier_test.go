@@ -15,8 +15,8 @@ import (
 
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/awesome"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/health"
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/polymarket"
 )
 
 type fakeQueue struct {
@@ -104,7 +104,7 @@ func (f *fakeSender) Send(_ context.Context, msg string) (int, error) {
 }
 
 func market(id, question string) db.AwesomeMarket {
-	return db.AwesomeMarket{Market: polymarket.Market{ID: id, Question: question, Slug: id}, Reason: awesome.ReasonDefault}
+	return db.AwesomeMarket{Market: domain.Market{ID: id, Question: question, Slug: id}, Reason: awesome.ReasonDefault}
 }
 
 func newTestNotifier(q Queue, s Sender) *Notifier {
@@ -259,7 +259,7 @@ func TestPace_SpacesCallsAcrossBatches(t *testing.T) {
 
 func TestFormat(t *testing.T) {
 	end := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
-	base := polymarket.Market{
+	base := domain.Market{
 		Question:      "Will <aliens> & UFOs land?",
 		Slug:          "aliens-land-2027",
 		EventSlug:     "aliens-land",
@@ -299,7 +299,7 @@ func TestFormat(t *testing.T) {
 }
 
 func TestFormat_Description(t *testing.T) {
-	mk := db.AwesomeMarket{Market: polymarket.Market{Question: "Q?", Slug: "q",
+	mk := db.AwesomeMarket{Market: domain.Market{Question: "Q?", Slug: "q",
 		Description: "  Resolves <Yes> if & only if…\n\nSource: AP.  "}, Reason: awesome.ReasonDefault}
 	want := "<b>Q?</b>\n\n<blockquote expandable>Resolves &lt;Yes&gt; if &amp; only if…\n\nSource: AP.</blockquote>\n\n✅ No deny rule matched"
 	if got := Format(mk); !strings.HasPrefix(got, want) {
@@ -563,7 +563,7 @@ func TestMoneyAndMarketURL(t *testing.T) {
 		{"ev", "", "https://polymarket.com/event/ev"},
 		{"", "mk", "https://polymarket.com/market/mk"},
 	} {
-		mk := db.AwesomeMarket{Market: polymarket.Market{EventSlug: tc.event, Slug: tc.slug}}
+		mk := db.AwesomeMarket{Market: domain.Market{EventSlug: tc.event, Slug: tc.slug}}
 		if got := marketURL(mk); got != tc.want {
 			t.Errorf("marketURL(%q, %q) = %q, want %q", tc.event, tc.slug, got, tc.want)
 		}
