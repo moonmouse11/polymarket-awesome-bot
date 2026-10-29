@@ -12,7 +12,7 @@ COPY . .
 # make targets run them in this image (docker compose run --rm bot ./rules).
 RUN go build -o bin/ ./cmd/...
 
-FROM alpine:3.24.2
+FROM alpine:3.24.3
 
 # Run as an unprivileged user instead of root.
 RUN adduser -D -H -u 10001 app
