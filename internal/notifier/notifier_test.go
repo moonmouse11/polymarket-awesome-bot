@@ -322,6 +322,18 @@ func TestFormat_Description(t *testing.T) {
 	if description("   ", 1000) != "" || description("text", 50) != "" {
 		t.Error("blank description or no room: want no section")
 	}
+
+	// Escaping grows the text: " becomes &#34; (6 characters). The cut must
+	// count the escaped length and not land inside an entity.
+	mk.Description = strings.Repeat(`"`, 2000)
+	got = Format(mk)
+	if n := len([]rune(got)); n > 4096 {
+		t.Errorf("description of quotes: message of %d characters; want ≤ 4096", n)
+	}
+	before, _ := strings.CutSuffix(got, "…</blockquote>")
+	if i := strings.LastIndex(before, "&"); i > strings.LastIndex(before, ";") {
+		t.Errorf("description of quotes: cut inside an HTML entity: %q", before[max(0, len(before)-12):])
+	}
 }
 
 func TestHashtags(t *testing.T) {
