@@ -351,16 +351,22 @@ func reason(mk db.AwesomeMarket) string {
 
 // description shows the market's resolution rules as a collapsed quote:
 // Telegram shows the first lines, the rest opens on tap. It is cut to limit
-// characters of text.
+// characters after HTML-escaping: escaping grows the text (& → &amp;), so
+// cutting the raw text could push the message over Telegram's 4096.
 func description(d string, limit int) string {
-	d = strings.TrimSpace(d)
+	d = html.EscapeString(strings.TrimSpace(d))
 	if d == "" || limit < 100 {
 		return ""
 	}
 	if r := []rune(d); len(r) > limit {
-		d = strings.TrimSpace(string(r[:limit-1])) + "…"
+		cut := string(r[:limit-1])
+		// The cut can land inside an entity (&am|p;): step back to its start.
+		if i := strings.LastIndex(cut, "&"); i > strings.LastIndex(cut, ";") {
+			cut = cut[:i]
+		}
+		d = strings.TrimSpace(cut) + "…"
 	}
-	return "<blockquote expandable>" + html.EscapeString(d) + "</blockquote>"
+	return "<blockquote expandable>" + d + "</blockquote>"
 }
 
 // rules lists matched rules: "tag «AI», word «alien», «ufo»".

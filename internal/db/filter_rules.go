@@ -187,7 +187,7 @@ func (m *MongoDB) FilterRuleHistory(ctx context.Context, n int64) ([]RuleChange,
 }
 
 // TagInUse reports whether any market has the tag, to catch typos: tags are
-// case-sensitive. A miss scans the whole collection (seconds).
+// case-sensitive. The tags index makes the lookup fast.
 func (m *MongoDB) TagInUse(ctx context.Context, tag string) (bool, error) {
 	err := m.db.Collection(marketsCollection).
 		FindOne(ctx, bson.D{{Key: "tags", Value: tag}}, options.FindOne().SetProjection(bson.D{{Key: "_id", Value: 1}})).Err()
