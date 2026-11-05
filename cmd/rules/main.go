@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/config"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 )
 
@@ -36,14 +37,14 @@ type Store interface {
 }
 
 func main() {
-	mongoURI := os.Getenv("MONGO_URI")
-	if mongoURI == "" {
-		fmt.Fprintln(os.Stderr, "MONGO_URI is not set (load it with: set -a; . ./.env; set +a)")
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	m, err := db.NewMongoDB(ctx, mongoURI, "polymarket")
+	m, err := db.NewMongoDB(ctx, cfg.MongoURI, cfg.MongoDBName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

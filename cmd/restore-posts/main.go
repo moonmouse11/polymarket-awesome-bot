@@ -18,13 +18,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/config"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
 	"github.com/rs/zerolog"
 )
 
 func main() {
-	log, err := logger.New(os.Getenv("LOG_LEVEL"), os.Getenv("LOG_FORMAT"), os.Stdout)
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	log, err := logger.New(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -36,7 +42,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, log, os.Args[1], "polymarket"); err != nil {
+	if err := run(ctx, log, os.Args[1], cfg.MongoURI, cfg.MongoDBName); err != nil {
 		log.Error().Err(err).Msg("Restoring posts failed")
 		os.Exit(1)
 	}
@@ -108,7 +114,7 @@ func marketSlug(href string) string {
 	return ""
 }
 
-func run(ctx context.Context, log zerolog.Logger, path, dbName string) error {
+func run(ctx context.Context, log zerolog.Logger, path, mongoURI, dbName string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -121,10 +127,6 @@ func run(ctx context.Context, log zerolog.Logger, path, dbName string) error {
 		return fmt.Errorf("no market links found in %s: is it the channel's JSON export?", path)
 	}
 
-	mongoURI := os.Getenv("MONGO_URI")
-	if mongoURI == "" {
-		return fmt.Errorf("MONGO_URI is not set (load it with: set -a; . ./.env; set +a)")
-	}
 	dbCtx, dbCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer dbCancel()
 	mongoDB, err := db.NewMongoDB(dbCtx, mongoURI, dbName)

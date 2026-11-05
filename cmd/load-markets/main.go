@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/config"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
@@ -36,7 +37,12 @@ type Upserter interface {
 }
 
 func main() {
-	log, err := logger.New(os.Getenv("LOG_LEVEL"), os.Getenv("LOG_FORMAT"), os.Stdout)
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	log, err := logger.New(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -44,7 +50,7 @@ func main() {
 
 	// Ctrl+C / SIGTERM stops the load; pages already written stay in the DB.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	err = run(ctx, log)
+	err = run(ctx, log, cfg)
 	// Read before stop(): stop() cancels ctx itself.
 	interrupted := ctx.Err() != nil
 	stop()
@@ -61,16 +67,10 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, log zerolog.Logger) error {
-
-	mongoURI := os.Getenv("MONGO_URI")
-	if mongoURI == "" {
-		return fmt.Errorf("MONGO_URI is not set (load it with: set -a; . ./.env; set +a)")
-	}
-
+func run(ctx context.Context, log zerolog.Logger, cfg config.Config) error {
 	dbCtx, dbCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer dbCancel()
-	mongoDB, err := db.NewMongoDB(dbCtx, mongoURI, "polymarket")
+	mongoDB, err := db.NewMongoDB(dbCtx, cfg.MongoURI, cfg.MongoDBName)
 	if err != nil {
 		return fmt.Errorf("initialize MongoDB: %w", err)
 	}
