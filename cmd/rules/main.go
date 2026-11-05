@@ -37,11 +37,7 @@ type Store interface {
 }
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	cfg := config.MustLoad()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	m, err := db.NewMongoDB(ctx, cfg.MongoURI, cfg.MongoDBName)

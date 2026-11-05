@@ -37,20 +37,12 @@ type Upserter interface {
 }
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	log, err := logger.New(cfg.LogLevel, cfg.LogFormat, os.Stdout)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	cfg := config.MustLoad()
+	log := logger.Must(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 
 	// Ctrl+C / SIGTERM stops the load; pages already written stay in the DB.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	err = run(ctx, log, cfg)
+	err := run(ctx, log, cfg)
 	// Read before stop(): stop() cancels ctx itself.
 	interrupted := ctx.Err() != nil
 	stop()

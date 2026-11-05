@@ -67,3 +67,14 @@ func Load() (Config, error) {
 	}
 	return cfg, nil
 }
+
+// MustLoad is Load for command mains: it exits with code 1 on invalid
+// environment instead of returning an error.
+func MustLoad() Config {
+	cfg, err := Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	return cfg
+}

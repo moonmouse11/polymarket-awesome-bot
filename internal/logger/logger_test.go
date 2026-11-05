@@ -69,3 +69,12 @@ func TestNew_RejectsInvalidValues(t *testing.T) {
 		t.Error("invalid LOG_FORMAT accepted")
 	}
 }
+
+func TestMust(t *testing.T) {
+	var buf bytes.Buffer
+	log := Must("info", "json", &buf)
+	log.Info().Msg("hello")
+	if !strings.Contains(buf.String(), "hello") {
+		t.Fatalf("Must logger lost the message: %q", buf.String())
+	}
+}

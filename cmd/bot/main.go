@@ -24,16 +24,8 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	log, err := logger.New(cfg.LogLevel, cfg.LogFormat, os.Stdout)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	cfg := config.MustLoad()
+	log := logger.Must(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 
 	// run returns instead of exiting, so its deferred cleanup (MongoDB close) always runs.
 	if err := run(log, cfg); err != nil {

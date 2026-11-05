@@ -25,16 +25,8 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	log, err := logger.New(cfg.LogLevel, cfg.LogFormat, os.Stdout)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	cfg := config.MustLoad()
+	log := logger.Must(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 	if len(os.Args) != 2 {
 		fmt.Fprintln(os.Stderr, "usage: restore-posts <result.json from Telegram Desktop export>")
 		os.Exit(2)

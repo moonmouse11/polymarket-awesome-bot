@@ -3,6 +3,7 @@ package logger
 import (
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -30,4 +31,15 @@ func New(level, format string, w io.Writer) (zerolog.Logger, error) {
 	}
 
 	return zerolog.New(w).Level(lvl).With().Timestamp().Logger(), nil
+}
+
+// Must is New for command mains: it exits with code 1 on invalid
+// level/format instead of returning an error.
+func Must(level, format string, w io.Writer) zerolog.Logger {
+	log, err := New(level, format, w)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	return log
 }

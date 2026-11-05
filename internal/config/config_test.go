@@ -76,3 +76,10 @@ func TestLoadInvalidValues(t *testing.T) {
 		t.Fatal("expected error for invalid POLL_INTERVAL and TELEGRAM_ADMIN_IDS")
 	}
 }
+
+func TestMustLoad(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	if cfg := MustLoad(); cfg.MongoURI == "" {
+		t.Error("MustLoad returned empty MongoURI")
+	}
+}
