@@ -3,11 +3,11 @@ package command
 import (
 	"context"
 	"errors"
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/config"
-	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"io"
 	"testing"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/config"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/rs/zerolog"
 )
 

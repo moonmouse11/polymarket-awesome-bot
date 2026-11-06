@@ -6,6 +6,7 @@ import (
 )
 
 func TestLoadRequiresMongoURI(t *testing.T) {
+	t.Setenv("MONGO_URI", "") // empty is treated as unset, even when .env provides a value
 	if _, err := Load(); err == nil {
 		t.Fatal("expected error when MONGO_URI is not set")
 	}
