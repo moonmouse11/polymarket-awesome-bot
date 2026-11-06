@@ -41,6 +41,22 @@ func Connect(ctx context.Context, uri, dbName string) (*MongoDB, error) {
 	return NewMongoDB(dbCtx, uri, dbName)
 }
 
+// Setup connects with Connect and ensures the market indexes exist — the
+// preamble every markets command starts with. The caller closes the handle
+// with CloseWithTimeout.
+func Setup(ctx context.Context, uri, dbName string) (*MongoDB, error) {
+	mongoDB, err := Connect(ctx, uri, dbName)
+	if err != nil {
+		return nil, fmt.Errorf("initialize MongoDB: %w", err)
+	}
+	// No timeout: building a new index on millions of markets takes minutes.
+	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {
+		mongoDB.CloseWithTimeout()
+		return nil, err
+	}
+	return mongoDB, nil
+}
+
 // CloseWithTimeout closes with a fresh 5-second context: at shutdown the
 // caller's ctx is usually already canceled.
 func (m *MongoDB) CloseWithTimeout() {

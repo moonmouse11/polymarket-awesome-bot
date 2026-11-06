@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"time"
 
@@ -26,16 +25,11 @@ func main() {
 }
 
 func run(ctx context.Context, log zerolog.Logger, cfg config.Config) error {
-	mongoDB, err := db.Connect(ctx, cfg.MongoURI, cfg.MongoDBName)
+	mongoDB, err := db.Setup(ctx, cfg.MongoURI, cfg.MongoDBName)
 	if err != nil {
-		return fmt.Errorf("initialize MongoDB: %w", err)
-	}
-	defer mongoDB.CloseWithTimeout()
-
-	// No timeout: building a new index on millions of markets takes minutes.
-	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {
 		return err
 	}
+	defer mongoDB.CloseWithTimeout()
 	if err := mongoDB.EnsureFilterRules(ctx); err != nil {
 		return err
 	}
