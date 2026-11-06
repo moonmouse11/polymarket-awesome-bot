@@ -56,7 +56,7 @@ func TestSetup(t *testing.T) {
 		skip("MONGO_TEST_URI is not set; see README → Тесты")
 	}
 
-	m, err := Setup(context.Background(), uri, "polymarket_test_setup")
+	m, err := Setup(context.Background(), uri, "polymarket_test")
 	if err != nil {
 		skip("MongoDB is not available (%v); start it with: docker compose up -d mongodb", err)
 	}
