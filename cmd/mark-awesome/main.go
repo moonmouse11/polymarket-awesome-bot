@@ -5,68 +5,30 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/command"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/config"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
 	"github.com/rs/zerolog"
 )
 
 func main() {
-	log, err := logger.New(os.Getenv("LOG_LEVEL"), os.Getenv("LOG_FORMAT"), os.Stdout)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	cfg := config.MustLoad()
+	log := logger.Must(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	err = run(ctx, log)
-	// Read before stop(): stop() cancels ctx itself.
-	interrupted := ctx.Err() != nil
-	stop()
-
-	switch {
-	case err == nil:
-	case interrupted:
-		// The update is a single server-side operation; rerun to recompute fully.
-		log.Info().Msg("Awesome marking stopped by signal; rerun to recompute")
-		os.Exit(130)
-	default:
-		log.Error().Err(err).Msg("Awesome marking failed")
-		os.Exit(1)
-	}
+	// The update is a single server-side operation; rerun to recompute fully.
+	command.MainWithDB("Awesome marking", "rerun to recompute", log, cfg,
+		func(ctx context.Context, m *db.MongoDB) error { return run(ctx, log, m) })
 }
 
-func run(ctx context.Context, log zerolog.Logger) error {
-	mongoURI := os.Getenv("MONGO_URI")
-	if mongoURI == "" {
-		return fmt.Errorf("MONGO_URI is not set (load it with: set -a; . ./.env; set +a)")
-	}
-
-	dbCtx, dbCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer dbCancel()
-	mongoDB, err := db.NewMongoDB(dbCtx, mongoURI, "polymarket")
-	if err != nil {
-		return fmt.Errorf("initialize MongoDB: %w", err)
-	}
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = mongoDB.Close(closeCtx)
-	}()
-
-	// No timeout: building a new index on millions of markets takes minutes.
-	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {
+func run(ctx context.Context, log zerolog.Logger, mongoDB *db.MongoDB) error {
+	if err := mongoDB.EnsureFilterRules(ctx); err != nil {
 		return err
 	}
-	if err := mongoDB.EnsureFilterRules(dbCtx); err != nil {
-		return err
-	}
-	rules, err := mongoDB.FilterRules(dbCtx)
+	rules, err := mongoDB.FilterRules(ctx)
 	if err != nil {
 		return err
 	}

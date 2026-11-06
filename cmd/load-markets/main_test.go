@@ -81,13 +81,6 @@ func TestLoadPass_FetchError(t *testing.T) {
 	}
 }
 
-func TestRun_NeedsMongoURI(t *testing.T) {
-	t.Setenv("MONGO_URI", "")
-	if err := run(context.Background(), zerolog.Nop()); err == nil || !strings.Contains(err.Error(), "MONGO_URI") {
-		t.Errorf("err = %v, want MONGO_URI is not set", err)
-	}
-}
-
 func TestLoadPass_StoppedBySignal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
