@@ -97,7 +97,6 @@ func TestRestore_StopsOnError(t *testing.T) {
 }
 
 func TestRun_FailsBeforeTouchingTheDatabase(t *testing.T) {
-	t.Setenv("MONGO_URI", "")
 	dir := t.TempDir()
 	write := func(name, data string) string {
 		path := filepath.Join(dir, name)
@@ -106,16 +105,12 @@ func TestRun_FailsBeforeTouchingTheDatabase(t *testing.T) {
 		}
 		return path
 	}
-	withPost := write("posts.json", `{"messages": [{"id": 1, "type": "message", "date_unixtime": "1700000000",
-		"text_entities": [{"type": "text_link", "href": "https://polymarket.com/market/ufo"}]}]}`)
-
 	for name, tc := range map[string]struct{ path, want string }{
 		"missing file": {filepath.Join(dir, "nope.json"), "no such file"},
 		"bad json":     {write("bad.json", "not json"), "parse export"},
 		"no posts":     {write("empty.json", `{"messages": []}`), "no market links"},
-		"no mongo uri": {withPost, "MONGO_URI"},
 	} {
-		if err := run(context.Background(), zerolog.Nop(), tc.path, "polymarket_test"); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if err := run(context.Background(), zerolog.Nop(), tc.path, "mongodb://localhost:1", "polymarket_test"); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
 		}
 	}
@@ -130,7 +125,6 @@ func TestRun_RestoresPostsInMongo(t *testing.T) {
 		}
 		t.Skip("MONGO_TEST_URI is not set")
 	}
-	t.Setenv("MONGO_URI", uri)
 	ctx := context.Background()
 
 	m, err := db.NewMongoDB(ctx, uri, "polymarket_test")
@@ -152,7 +146,7 @@ func TestRun_RestoresPostsInMongo(t *testing.T) {
 	}
 
 	var logs bytes.Buffer
-	if err := run(ctx, zerolog.New(&logs), path, "polymarket_test"); err != nil {
+	if err := run(ctx, zerolog.New(&logs), path, uri, "polymarket_test"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if want := `"posts":2,"restored":1,"unmatched":1`; !strings.Contains(logs.String(), want) {

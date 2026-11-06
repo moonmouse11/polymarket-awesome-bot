@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/admin"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/config"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/health"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
@@ -23,46 +24,29 @@ import (
 )
 
 func main() {
-	log, err := logger.New(os.Getenv("LOG_LEVEL"), os.Getenv("LOG_FORMAT"), os.Stdout)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	cfg := config.MustLoad()
+	log := logger.Must(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 
 	// run returns instead of exiting, so its deferred cleanup (MongoDB close) always runs.
-	if err := run(log); err != nil {
+	if err := run(log, cfg); err != nil {
 		log.Error().Err(err).Msg("Bot stopped with error")
 		os.Exit(1)
 	}
 	log.Info().Msg("Bot stopped gracefully")
 }
 
-func run(log zerolog.Logger) error {
+func run(log zerolog.Logger, cfg config.Config) error {
 	log.Info().Msg("Starting Polymarket Bot")
 
 	// 1. Setup graceful shutdown context
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 2. Read environment variables
-	mongoURI := os.Getenv("MONGO_URI")
-	if mongoURI == "" {
-		mongoURI = "mongodb://localhost:27017"
-	}
-	pollInterval, err := updater.ParseInterval(os.Getenv("POLL_INTERVAL"))
-	if err != nil {
-		return err
-	}
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080" // Default port for health checks (required by Replit/Render/etc)
-	}
-
-	// 3. Initialize Database
+	// 2. Initialize Database
 	dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer dbCancel()
 
-	mongoDB, err := db.NewMongoDB(dbCtx, mongoURI, "polymarket")
+	mongoDB, err := db.NewMongoDB(dbCtx, cfg.MongoURI, cfg.MongoDBName)
 	if err != nil {
 		return fmt.Errorf("initialize MongoDB: %w", err)
 	}
@@ -97,19 +81,16 @@ func run(log zerolog.Logger) error {
 		return err
 	}
 
-	adminIDs, err := admin.ParseAdminIDs(os.Getenv("TELEGRAM_ADMIN_IDS"))
-	if err != nil {
-		return err
-	}
+	adminIDs := cfg.TelegramAdminIDs
 	// The bot's own state (cycles, errors, 429s) for admin commands and alerts.
 	reg := health.NewRegistry()
 	commands := admin.New(adminIDs, mongoDB, reg, log)
 
 	// Telegram is optional: without a token the bot only tracks markets.
 	var tg *notifier.Telegram
-	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
+	if token := cfg.TelegramToken; token != "" {
 		tgLog := log.With().Str("component", "telegram").Logger()
-		if tg, err = notifier.NewTelegram(token, os.Getenv("TELEGRAM_CHANNEL_ID"),
+		if tg, err = notifier.NewTelegram(token, cfg.TelegramChannel,
 			bot.WithDefaultHandler(commands.Handle),
 			bot.WithAllowedUpdates(bot.AllowedUpdates{"message"}),
 			// Errors of receiving messages (long polling), e.g. Telegram unreachable.
@@ -151,7 +132,7 @@ func run(log zerolog.Logger) error {
 	})
 
 	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%s", port),
+		Addr:              fmt.Sprintf(":%s", cfg.Port),
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -160,7 +141,7 @@ func run(log zerolog.Logger) error {
 	}
 
 	g.Go(func() error {
-		log.Info().Str("port", port).Msg("Starting health check server")
+		log.Info().Str("port", cfg.Port).Msg("Starting health check server")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("http server error: %w", err)
 		}
@@ -176,7 +157,7 @@ func run(log zerolog.Logger) error {
 	})
 
 	// Task B: keep markets up to date (polls the API every POLL_INTERVAL)
-	upd := updater.New(polymarket.NewClient(polymarket.DefaultBaseURL, log), mongoDB, log, pollInterval).WithHealth(reg)
+	upd := updater.New(polymarket.NewClient(polymarket.DefaultBaseURL, log), mongoDB, log, cfg.PollInterval).WithHealth(reg)
 	g.Go(func() error {
 		return upd.Run(gCtx)
 	})
