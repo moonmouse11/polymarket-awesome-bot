@@ -20,16 +20,11 @@ func main() {
 	log := logger.Must(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 
 	// The update is a single server-side operation; rerun to recompute fully.
-	command.Main("Awesome marking", "rerun to recompute", log,
-		func(ctx context.Context) error { return run(ctx, log, cfg) })
+	command.MainWithDB("Awesome marking", "rerun to recompute", log, cfg,
+		func(ctx context.Context, m *db.MongoDB) error { return run(ctx, log, m) })
 }
 
-func run(ctx context.Context, log zerolog.Logger, cfg config.Config) error {
-	mongoDB, err := db.Setup(ctx, cfg.MongoURI, cfg.MongoDBName)
-	if err != nil {
-		return err
-	}
-	defer mongoDB.CloseWithTimeout()
+func run(ctx context.Context, log zerolog.Logger, mongoDB *db.MongoDB) error {
 	if err := mongoDB.EnsureFilterRules(ctx); err != nil {
 		return err
 	}

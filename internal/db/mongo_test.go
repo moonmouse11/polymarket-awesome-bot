@@ -84,3 +84,9 @@ func TestSetup(t *testing.T) {
 		t.Errorf("indexes = %v, want more than just _id", names)
 	}
 }
+
+func TestSetupConnectError(t *testing.T) {
+	if _, err := Setup(context.Background(), "mongodb://127.0.0.1:1", "polymarket_test"); err == nil {
+		t.Fatal("expected connect error")
+	}
+}

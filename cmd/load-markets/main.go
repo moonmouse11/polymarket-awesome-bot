@@ -40,17 +40,11 @@ func main() {
 	log := logger.Must(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 
 	// Pages already written stay in the DB, so a rerun continues the load.
-	command.Main("Market load", "written pages are kept, rerun to continue", log,
-		func(ctx context.Context) error { return run(ctx, log, cfg) })
+	command.MainWithDB("Market load", "written pages are kept, rerun to continue", log, cfg,
+		func(ctx context.Context, m *db.MongoDB) error { return run(ctx, log, m) })
 }
 
-func run(ctx context.Context, log zerolog.Logger, cfg config.Config) error {
-	mongoDB, err := db.Setup(ctx, cfg.MongoURI, cfg.MongoDBName)
-	if err != nil {
-		return err
-	}
-	defer mongoDB.CloseWithTimeout()
-
+func run(ctx context.Context, log zerolog.Logger, mongoDB *db.MongoDB) error {
 	client := polymarket.NewClient(polymarket.DefaultBaseURL, log)
 
 	// Open and closed passes run in parallel. A market that closes during the

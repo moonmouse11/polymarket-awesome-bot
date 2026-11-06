@@ -3,6 +3,8 @@ package command
 import (
 	"context"
 	"errors"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/config"
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"io"
 	"testing"
 
@@ -39,5 +41,16 @@ func TestRunInterrupted(t *testing.T) {
 		func(context.Context) error { return context.Canceled })
 	if code != 130 {
 		t.Errorf("code = %d, want 130", code)
+	}
+}
+
+func TestRunWithDBConnectError(t *testing.T) {
+	cfg := config.Config{MongoURI: "mongodb://127.0.0.1:1", MongoDBName: "test"}
+	err := RunWithDB(context.Background(), cfg, func(context.Context, *db.MongoDB) error {
+		t.Fatal("run must not be called when connect fails")
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected connect error")
 	}
 }
