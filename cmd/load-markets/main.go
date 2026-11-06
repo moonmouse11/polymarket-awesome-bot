@@ -6,10 +6,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/command"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/config"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/domain"
@@ -40,37 +39,17 @@ func main() {
 	cfg := config.MustLoad()
 	log := logger.Must(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 
-	// Ctrl+C / SIGTERM stops the load; pages already written stay in the DB.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	err := run(ctx, log, cfg)
-	// Read before stop(): stop() cancels ctx itself.
-	interrupted := ctx.Err() != nil
-	stop()
-
-	switch {
-	case err == nil:
-	case interrupted:
-		// Stopped on purpose: not a failure, the error is just "context canceled".
-		log.Info().Msg("Market load stopped by signal; written pages are kept, rerun to continue")
-		os.Exit(130) // 128 + SIGINT, the shell convention for an interrupted command
-	default:
-		log.Error().Err(err).Msg("Market load failed")
-		os.Exit(1)
-	}
+	// Pages already written stay in the DB, so a rerun continues the load.
+	command.Main("Market load", "written pages are kept, rerun to continue", log,
+		func(ctx context.Context) error { return run(ctx, log, cfg) })
 }
 
 func run(ctx context.Context, log zerolog.Logger, cfg config.Config) error {
-	dbCtx, dbCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer dbCancel()
-	mongoDB, err := db.NewMongoDB(dbCtx, cfg.MongoURI, cfg.MongoDBName)
+	mongoDB, err := db.Connect(ctx, cfg.MongoURI, cfg.MongoDBName)
 	if err != nil {
 		return fmt.Errorf("initialize MongoDB: %w", err)
 	}
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = mongoDB.Close(closeCtx)
-	}()
+	defer mongoDB.CloseWithTimeout()
 
 	// No timeout: building a new index on millions of markets takes minutes.
 	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {

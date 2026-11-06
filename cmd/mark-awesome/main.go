@@ -7,10 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
+	"github.com/moonmouse11/polymarket-awesome-bot/internal/command"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/config"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/db"
 	"github.com/moonmouse11/polymarket-awesome-bot/internal/logger"
@@ -21,45 +20,26 @@ func main() {
 	cfg := config.MustLoad()
 	log := logger.Must(cfg.LogLevel, cfg.LogFormat, os.Stdout)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	err := run(ctx, log, cfg)
-	// Read before stop(): stop() cancels ctx itself.
-	interrupted := ctx.Err() != nil
-	stop()
-
-	switch {
-	case err == nil:
-	case interrupted:
-		// The update is a single server-side operation; rerun to recompute fully.
-		log.Info().Msg("Awesome marking stopped by signal; rerun to recompute")
-		os.Exit(130)
-	default:
-		log.Error().Err(err).Msg("Awesome marking failed")
-		os.Exit(1)
-	}
+	// The update is a single server-side operation; rerun to recompute fully.
+	command.Main("Awesome marking", "rerun to recompute", log,
+		func(ctx context.Context) error { return run(ctx, log, cfg) })
 }
 
 func run(ctx context.Context, log zerolog.Logger, cfg config.Config) error {
-	dbCtx, dbCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer dbCancel()
-	mongoDB, err := db.NewMongoDB(dbCtx, cfg.MongoURI, cfg.MongoDBName)
+	mongoDB, err := db.Connect(ctx, cfg.MongoURI, cfg.MongoDBName)
 	if err != nil {
 		return fmt.Errorf("initialize MongoDB: %w", err)
 	}
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = mongoDB.Close(closeCtx)
-	}()
+	defer mongoDB.CloseWithTimeout()
 
 	// No timeout: building a new index on millions of markets takes minutes.
 	if err := mongoDB.EnsureMarketIndexes(ctx); err != nil {
 		return err
 	}
-	if err := mongoDB.EnsureFilterRules(dbCtx); err != nil {
+	if err := mongoDB.EnsureFilterRules(ctx); err != nil {
 		return err
 	}
-	rules, err := mongoDB.FilterRules(dbCtx)
+	rules, err := mongoDB.FilterRules(ctx)
 	if err != nil {
 		return err
 	}
