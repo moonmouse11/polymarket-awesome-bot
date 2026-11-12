@@ -3,7 +3,7 @@ module github.com/moonmouse11/polymarket-awesome-bot
 go 1.27.0
 
 require (
-	github.com/go-telegram/bot v1.27.0
+	github.com/go-telegram/bot v1.28.0
 	github.com/rs/zerolog v1.35.1
 	go.mongodb.org/mongo-driver v1.17.10
 	golang.org/x/sync v0.24.0
