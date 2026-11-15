@@ -1,5 +1,5 @@
 # Exact versions: rebuilds must produce the same image. Bump deliberately.
-FROM golang:1.27.2-alpine3.24 AS builder
+FROM golang:1.27.4-alpine3.24 AS builder
 
 WORKDIR /app
 
@@ -12,7 +12,7 @@ COPY . .
 # make targets run them in this image (docker compose run --rm bot ./rules).
 RUN go build -o bin/ ./cmd/...
 
-FROM alpine:3.24.3
+FROM alpine:3.24.4
 
 # Run as an unprivileged user instead of root.
 RUN adduser -D -H -u 10001 app
